@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="podcast-dashboard panel">
+  <header class="podcast-dashboard-head">
+    <h2>Podcast Playlists</h2>
+    <div class="dashboard-chrome" aria-hidden="true">
+      <span class="chrome-ring"></span>
+      <span></span>
+      <span></span>
+    </div>
+  </header>
+
+  <div class="podcast-dashboard-body">
+    <section class="podcast-column playlist-column">
+      <div class="podcast-tools">
+        <form action="/history" method="get" class="dashboard-search">
+          {% if selected_playlist_id %}<input type="hidden" name="playlist" value="{{ selected_playlist_id }}" />{% endif %}
+          {% if episode_query %}<input type="hidden" name="episode_q" value="{{ episode_query }}" />{% endif %}
+          {% if show_all_playlists %}<input type="hidden" name="show_all" value="1" />{% endif %}
+          <input
+            type="search"
+            name="playlist_q"
+            value="{{ playlist_query }}"
+            placeholder="Buscar playlists"
+            aria-label="Buscar playlists"
+          />
+        </form>
+
+        <form action="/playlists" method="post" class="dashboard-create">
+          <input type="hidden" name="redirect_to" value="/history{% if selected_playlist_id or playlist_query or episode_query or show_all_playlists %}?{% endif %}{% if selected_playlist_id %}playlist={{ selected_playlist_id }}{% endif %}{% if selected_playlist_id and playlist_query %}&{% endif %}{% if playlist_query %}playlist_q={{ playlist_query }}{% endif %}{% if (selected_playlist_id or playlist_query) and episode_query %}&{% endif %}{% if episode_query %}episode_q={{ episode_query }}{% endif %}{% if (selected_playlist_id or playlist_query or episode_query) and show_all_playlists %}&{% endif %}{% if show_all_playlists %}show_all=1{% endif %}" />
+          <input type="text" name="name" placeholder="Nueva playlist" aria-label="Nueva playlist" required />
+          <button type="submit" class="ghost">Crear</button>
+        </form>
+      </div>
+
+      <div class="playlist-stack">
+        {% for playlist in visible_playlists %}
+        <form action="/history" method="get" class="playlist-row-form">
+          {% if playlist_query %}<input type="hidden" name="playlist_q" value="{{ playlist_query }}" />{% endif %}
+          {% if episode_query %}<input type="hidden" name="episode_q" value="{{ episode_query }}" />{% endif %}
+          {% if show_all_playlists %}<input type="hidden" name="show_all" value="1" />{% endif %}
+          <input type="hidden" name="playlist" value="{{ playlist.id }}" />
+          <button type="submit" class="playlist-line {{ 'active' if selected_playlist_id == playlist.id else '' }}">
+            <span class="playlist-line-name">{{ playlist.name }}</span>
+            <span class="playlist-line-count">{{ playlist.item_count }} Episodios</span>
+          </button>
+        </form>
+        {% else %}
+        <div class="empty-state">
+          <p>No hay playlists que coincidan con la búsqueda.</p>
+        </div>
+        {% endfor %}
+      </div>
+
+      <form action="/history" method="get" class="playlist-expand-form">
+        {% if playlist_query %}<input type="hidden" name="playlist_q" value="{{ playlist_query }}" />{% endif %}
+        {% if episode_query %}<input type="hidden" name="episode_q" value="{{ episode_query }}" />{% endif %}
+        {% if selected_playlist_id %}<input type="hidden" name="playlist" value="{{ selected_playlist_id }}" />{% endif %}
+        {% if show_all_playlists %}
+        <button type="submit" class="view-all-playlists">Collapse Playlists</button>
+        {% else %}
+        <input type="hidden" name="show_all" value="1" />
+        <button type="submit" class="view-all-playlists">View All Playlists</button>
+        {% endif %}
+      </form>
+    </section>
+
+    <section class="podcast-column episode-column">
+      <div class="playlist-detail-card">
+        <h3>{{ selected_playlist.name if selected_playlist else 'Playlist sin selección' }}</h3>
+        <p class="playlist-detail-count">
+          {% if selected_playlist %}
+          {{ selected_playlist.item_count }} Episodios
+          {% else %}
+          0 Episodios
+          {% endif %}
+        </p>
+      </div>
+
+      <div class="episode-section">
+        <div class="episode-section-head">
+          <div>
+            <h3>Episodios</h3>
+          </div>
+          <form action="/history" method="get" class="dashboard-search episode-filter">
+            {% if selected_playlist_id %}<input type="hidden" name="playlist" value="{{ selected_playlist_id }}" />{% endif %}
+            {% if playlist_query %}<input type="hidden" name="playlist_q" value="{{ playlist_query }}" />{% endif %}
+            {% if show_all_playlists %}<input type="hidden" name="show_all" value="1" />{% endif %}
+            <input
+              type="search"
+              name="episode_q"
+              value="{{ episode_query }}"
+              placeholder="Buscar episodios"
+              aria-label="Buscar episodios"
+            />
+          </form>
+        </div>
+
+        {% if history_items %}
+        <div class="episode-card-list">
+          {% for item in history_items %}
+          <article class="episode-card">
+            <button
+              type="button"
+              class="episode-play-button"
+              data-audio-src="/audio/{{ item.output_files.wav }}"
+              data-audio-title="{{ item.title }}"
+              data-audio-meta="Episodio {{ loop.index }} · {{ "%.1f"|format((item.duration_seconds or 0) / 60) }} mins"
+              data-audio-description="Voz {{ item.voice_name or 'N/A' }} · Variante {{ item.variant }}{% if item.source_filename %} · Fuente {{ item.source_filename }}{% endif %}"
+              data-audio-wav="/download/{{ item.output_files.wav }}"
+              {% if item.output_files.mp3 %}data-audio-mp3="/download/{{ item.output_files.mp3 }}"{% endif %}
+              {% if item.output_files.m4a %}data-audio-m4a="/download/{{ item.output_files.m4a }}"{% endif %}
+              data-play-mode="preview"
+              aria-label="Reproducir {{ item.title }}"
+            >
+              ▶
+            </button>
+            <div class="episode-card-copy">
+              <strong>{{ item.title }}</strong>
+              <span class="episode-meta">
+                Episodio {{ loop.index }} · {{ "%.1f"|format((item.duration_seconds or 0) / 60) }} mins
+              </span>
+              <p class="episode-description">
+                Voz {{ item.voice_name or 'N/A' }} · Variante {{ item.variant }}{% if item.source_filename %} · Fuente {{ item.source_filename }}{% endif %}
+              </p>
+            </div>
+            <div class="episode-card-actions">
+              <button
+                type="button"
+                class="play-episode-button"
+                data-audio-src="/audio/{{ item.output_files.wav }}"
+                data-audio-title="{{ item.title }}"
+                data-audio-meta="Episodio {{ loop.index }} · {{ "%.1f"|format((item.duration_seconds or 0) / 60) }} mins"
+                data-audio-description="Voz {{ item.voice_name or 'N/A' }} · Variante {{ item.variant }}{% if item.source_filename %} · Fuente {{ item.source_filename }}{% endif %}"
+                data-audio-wav="/download/{{ item.output_files.wav }}"
+                {% if item.output_files.mp3 %}data-audio-mp3="/download/{{ item.output_files.mp3 }}"{% endif %}
+                {% if item.output_files.m4a %}data-audio-m4a="/download/{{ item.output_files.m4a }}"{% endif %}
+                data-play-mode="full"
+              >
+                Play Episode
+              </button>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <p>No hay episodios que coincidan con los filtros actuales.</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <div class="history-player hidden" id="history-player-shell">
+    <div class="history-player-main">
+      <div class="history-player-copy">
+        <span class="eyebrow" id="history-player-mode">Now Playing</span>
+        <strong id="history-player-title">Selecciona un episodio</strong>
+        <p id="history-player-meta" class="history-player-meta">Elige un preview o reproduce el episodio completo.</p>
+        <p id="history-player-description" class="history-player-description"></p>
+      </div>
+      <div class="history-player-controls">
+        <div class="history-player-buttons">
+          <button type="button" class="player-control ghost" id="history-backward">-10s</button>
+          <button type="button" class="player-control primary" id="history-toggle-play">Play</button>
+          <button type="button" class="player-control ghost" id="history-forward">+10s</button>
+          <label class="speed-control">
+            <span>Velocidad</span>
+            <select id="history-speed">
+              <option value="0.9">0.9x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="1.15">1.15x</option>
+              <option value="1.3">1.3x</option>
+            </select>
+          </label>
+        </div>
+        <div class="history-player-progress">
+          <span id="history-current-time">0:00</span>
+          <input type="range" id="history-seek" min="0" max="100" value="0" />
+          <span id="history-duration">0:00</span>
+        </div>
+      </div>
+    </div>
+    <div class="history-player-side">
+      <div class="history-player-downloads">
+        <a id="history-download-wav" href="#" class="ghost" download>WAV</a>
+        <a id="history-download-mp3" href="#" class="ghost hidden" download>MP3</a>
+        <a id="history-download-m4a" href="#" class="ghost hidden" download>M4A</a>
+      </div>
+      <audio id="history-audio-player" preload="metadata"></audio>
+    </div>
+  </div>
+</section>
+{% endblock %}

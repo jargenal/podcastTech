@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ settings.app_title if settings else "PodcastTech Offline TTS" }}</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='css/app.css') }}" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">PT</div>
+          <div>
+            <p class="eyebrow">Offline Studio</p>
+            <h1>PodcastTech</h1>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Generador</a>
+          <a href="/history" class="{{ 'active' if request.url.path.startswith('/history') else '' }}">Historial</a>
+          <a href="/health" target="_blank" rel="noreferrer">Health</a>
+        </nav>
+        <div class="sidebar-panel">
+          <p class="eyebrow">Estado</p>
+          <div class="status-grid">
+            <div>
+              <span class="status-label">Motor</span>
+              <strong>{{ "XTTS operativo" if engine_ok else "XTTS pendiente" }}</strong>
+            </div>
+            <div>
+              <span class="status-label">FFmpeg</span>
+              <strong>{{ "Disponible" if ffmpeg_available else "No detectado" }}</strong>
+            </div>
+          </div>
+          {% if engine_message %}
+          <p class="muted">{{ engine_message }}</p>
+          {% endif %}
+        </div>
+      </aside>
+      <main class="content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    <div id="toast-stack" class="toast-stack"></div>
+    <script src="{{ request.url_for('static', path='js/app.js') }}" defer></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "host": "127.0.0.1",
+  "port": 8040,
+  "app_title": "PodcastTech Offline TTS",
+  "default_language": "es",
+  "default_variant": "es_latam",
+  "default_voice": "voices/default_es_mx.wav",
+  "default_speed": 1.0,
+  "default_english_speed": 1.0,
+  "default_segment_length": 220,
+  "default_temperature": 0.65,
+  "default_english_temperature": 0.45,
+  "default_pause_ms": 700,
+  "normalize_audio": true,
+  "output_format": "wav",
+  "output_dir": "output",
+  "input_dir": "input",
+  "voices_dir": "voices",
+  "temp_dir": "temp",
+  "history_file": "output/history.json",
+  "playlists_file": "output/playlists.json",
+  "variants": {
+    "es_latam": {
+      "label": "Español Latinoamericano",
+      "tts_language": "es",
+      "default_voice": "voices/default_es_mx.wav",
+      "fallback_variant": "es_neutro"
+    },
+    "es_neutro": {
+      "label": "Español Neutro",
+      "tts_language": "es",
+      "default_voice": "voices/default_es_mx.wav",
+      "fallback_variant": "es_latam"
+    },
+    "es_es": {
+      "label": "Español España",
+      "tts_language": "es",
+      "default_voice": "voices/default_es_mx.wav",
+      "fallback_variant": "es_neutro"
+    }
+  },
+  "tts": {
+    "engine": "xtts_v2",
+    "xtts_model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
+    "device_preference": "cpu"
+  },
+  "speech": {
+    "enabled": true,
+    "spell_acronyms": true,
+    "restore_spanish_accents": true,
+    "pronunciation_lexicon_overrides_file": "app/config/lexicons/pronunciation_overrides.json",
+    "accent_lexicon_overrides_file": "app/config/lexicons/accent_overrides.json"
+  },
+  "eco_mode": {
+    "enabled": true,
+    "max_torch_threads": 4,
+    "max_interop_threads": 1,
+    "inter_segment_cooldown_ms": 250
+  },
+  "audio_tuning": {
+    "sentence_pause_ms": 220,
+    "segment_fade_ms": 28,
+    "crossfade_ms": 18,
+    "bilingual_transition_pause_ms": 120,
+    "strip_terminal_periods": true
+  }
+}

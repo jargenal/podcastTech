@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Generacion local</p>
+    <h2>Texto a voz para podcasts tecnicos, 100% offline</h2>
+    <p class="hero-copy">
+      Carga guiones largos, ajusta variante de espanol, usa una voz de referencia y monitorea cada segmento en tiempo real.
+    </p>
+  </div>
+  <div class="hero-badges">
+    <span>FastAPI</span>
+    <span>XTTS v2</span>
+    <span>Apple Silicon</span>
+  </div>
+</section>
+
+<section class="dashboard-grid">
+  <article class="panel panel-form">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Entrada</p>
+        <h3>Configurar render</h3>
+      </div>
+    </div>
+    <form id="generate-form" class="form-grid">
+      <label>
+        <span>Titulo del episodio</span>
+        <input type="text" name="title" placeholder="Arquitectura de soluciones offline" />
+      </label>
+
+      <label class="field-span-2">
+        <span>Subir .txt o .md</span>
+        <input type="file" name="text_file" accept=".txt,.md,text/plain,text/markdown" />
+      </label>
+
+      <label class="field-span-2">
+        <span>Texto manual</span>
+        <textarea name="text_input" rows="12" placeholder="Pega aqui el guion o usa etiquetas como [TITULO], [IDIOMA], [VOZ], [VOZ_EN], [TEXTO], [PAUSA], [PRON]termino|pronunciacion[/PRON] o [EN]english phrase[/EN]."></textarea>
+      </label>
+
+      <label>
+        <span>Variante</span>
+        <select name="variant">
+          {% for code, variant in variants.items() %}
+          <option value="{{ code }}" {% if code == settings.default_variant %}selected{% endif %}>{{ variant.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        <span>Voz de referencia</span>
+        <select name="voice_name">
+          <option value="">Auto / fallback</option>
+          {% for voice in voices %}
+          <option value="{{ voice }}">{{ voice }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        <span>Voz inglesa opcional</span>
+        <select name="english_voice_name">
+          <option value="">Usar voz principal</option>
+          {% for voice in voices %}
+          <option value="{{ voice }}">{{ voice }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field-span-2">
+        <span>Playlists</span>
+        <select name="playlist_ids" multiple size="4">
+          {% for playlist in playlists %}
+          <option value="{{ playlist.id }}" {% if playlist.id == 'default' %}selected{% endif %}>
+            {{ playlist.name }}{% if playlist.item_count %} ({{ playlist.item_count }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <small class="muted">Selecciona una o varias. Si no cambias nada, se guardara en Default.</small>
+      </label>
+
+      <label class="field-span-2">
+        <span>Nueva playlist rapida</span>
+        <input type="text" name="new_playlist_name" placeholder="Ejemplo: Episodios IA, Demo Cliente, Pruebas Spotify" />
+      </label>
+
+      <label class="field-span-2">
+        <span>Subir nueva voz .wav</span>
+        <input type="file" name="voice_upload" accept=".wav,audio/wav" />
+      </label>
+
+      <label class="field-span-2">
+        <span>Subir voz inglesa .wav</span>
+        <input type="file" name="english_voice_upload" accept=".wav,audio/wav" />
+      </label>
+
+      <label>
+        <span>Velocidad</span>
+        <input type="range" name="speed" min="0.7" max="1.4" step="0.05" value="{{ settings.default_speed }}" data-output="speed-output" />
+        <small id="speed-output">{{ settings.default_speed }}</small>
+      </label>
+
+      <label>
+        <span>Velocidad EN</span>
+        <input type="range" name="english_speed" min="0.7" max="1.4" step="0.05" value="{{ settings.default_english_speed }}" data-output="english-speed-output" />
+        <small id="english-speed-output">{{ settings.default_english_speed }}</small>
+      </label>
+
+      <label>
+        <span>Segmento maximo</span>
+        <input type="range" name="segment_length" min="120" max="450" step="10" value="{{ settings.default_segment_length }}" data-output="segment-output" />
+        <small id="segment-output">{{ settings.default_segment_length }} chars</small>
+      </label>
+
+      <label>
+        <span>Temperatura</span>
+        <input type="range" name="temperature" min="0.1" max="1.2" step="0.05" value="{{ settings.default_temperature }}" data-output="temperature-output" />
+        <small id="temperature-output">{{ settings.default_temperature }}</small>
+      </label>
+
+      <label>
+        <span>Temperatura EN</span>
+        <input type="range" name="english_temperature" min="0.1" max="1.2" step="0.05" value="{{ settings.default_english_temperature }}" data-output="english-temperature-output" />
+        <small id="english-temperature-output">{{ settings.default_english_temperature }}</small>
+      </label>
+
+      <div class="toggle-group">
+        <label class="toggle">
+          <input type="checkbox" name="normalize_audio" value="true" {% if settings.normalize_audio %}checked{% endif %} />
+          <span>Normalizar audio</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" name="export_mp3" value="true" />
+          <span>Exportar MP3</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" name="export_m4a" value="true" />
+          <span>Exportar M4A</span>
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <div class="form-action-buttons">
+          <button type="submit" class="primary">Generar Audio</button>
+          <button type="button" id="preview-button" class="ghost">Previsualizar pronunciacion</button>
+        </div>
+        <div>
+          <p class="muted">Salida web local: <code>http://{{ settings.host }}:{{ settings.port }}</code></p>
+          {% if settings.eco_mode.enabled %}
+          <p class="muted">Modo eco activo: {{ settings.eco_mode.max_torch_threads }} hilos maximos y {{ settings.eco_mode.inter_segment_cooldown_ms }} ms entre segmentos.</p>
+          {% endif %}
+          <p class="muted">Los spans marcados con <code>[EN]...[/EN]</code> usan pausas cortas de transicion y pueden usar voz/ajustes propios.</p>
+        </div>
+      </div>
+
+      <div id="preview-panel" class="preview-panel hidden">
+        <div class="preview-head">
+          <strong>Asi se enviara al motor TTS</strong>
+          <span id="preview-meta" class="muted"></span>
+        </div>
+        <pre id="preview-box" class="preview-box"></pre>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel panel-run">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Monitor</p>
+        <h3>Progreso en tiempo real</h3>
+      </div>
+      <span id="job-status-badge" class="badge idle">En espera</span>
+    </div>
+    <div class="progress-shell">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <p id="progress-text" class="muted">Sin ejecucion activa.</p>
+    <div id="warnings-box" class="warnings-box hidden"></div>
+    <div class="log-box" id="log-box"></div>
+    <div id="result-box" class="result-box hidden"></div>
+  </aside>
+</section>
+
+<section class="panel history-panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Historial</p>
+      <h3>Audios generados</h3>
+    </div>
+    <a class="link" href="/history">Ver todo</a>
+  </div>
+  <div id="history-grid" class="history-grid">
+    {% for item in history_items %}
+    <article class="history-card">
+      <div class="history-meta">
+        <span>{{ item.variant }}</span>
+        <span>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      </div>
+      <h4>{{ item.title }}</h4>
+      <p class="muted">Voz: {{ item.voice_name or 'sin referencia' }}</p>
+      <audio controls preload="none" src="/audio/{{ item.output_files.wav }}"></audio>
+      <div class="history-actions">
+        <div class="history-tags">
+          {% for playlist_id in item.playlist_ids %}
+          {% set playlist = playlist_map.get(playlist_id) %}
+          {% if playlist %}<span class="playlist-pill">{{ playlist.name }}</span>{% endif %}
+          {% endfor %}
+        </div>
+        <a href="/download/{{ item.output_files.wav }}">Descargar WAV</a>
+        {% if item.output_files.mp3 %}<a href="/download/{{ item.output_files.mp3 }}">MP3</a>{% endif %}
+        {% if item.output_files.m4a %}<a href="/download/{{ item.output_files.m4a }}">M4A</a>{% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state">
+      <p>No hay renders todavia. El primer audio aparecera aqui.</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
