@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from app.models.domain import SpeechSpan
@@ -63,6 +64,15 @@ if TYPE_CHECKING:
     from app.config.settings import AppSettings
 
 
+@dataclass
+class TextProcessingDebug:
+    transformations: list[dict[str, str]] = field(default_factory=list)
+
+    def add(self, *, token: str, output: str, reason: str) -> None:
+        if token != output:
+            self.transformations.append({"token": token, "output": output, "reason": reason})
+
+
 def normalize_text(text: str) -> str:
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
     cleaned = cleaned.replace("“", '"').replace("”", '"').replace("’", "'").replace("–", "-")
@@ -79,6 +89,16 @@ def normalize_text(text: str) -> str:
 
 
 def adapt_text_for_speech(text: str, settings: AppSettings) -> str:
+    return _adapt_text_for_speech(text, settings)
+
+
+def adapt_text_for_speech_debug(text: str, settings: AppSettings) -> tuple[str, TextProcessingDebug]:
+    debug = TextProcessingDebug()
+    adapted = _adapt_text_for_speech(text, settings, debug=debug)
+    return adapted, debug
+
+
+def _adapt_text_for_speech(text: str, settings: AppSettings, *, debug: TextProcessingDebug | None = None) -> str:
     if not text or not settings.speech.enabled:
         return text.strip()
 
@@ -88,8 +108,8 @@ def adapt_text_for_speech(text: str, settings: AppSettings) -> str:
         adapted = _restore_spanish_accents(adapted, settings.speech.accent_lexicon)
     adapted = _extract_inline_pronunciations(adapted, placeholders)
     adapted = _extract_english_spans(adapted, placeholders, settings)
-    adapted = _apply_lexicon(adapted, settings.speech.pronunciation_lexicon)
-    adapted = _adapt_technical_tokens(adapted, settings)
+    adapted = _apply_pronunciation_lexicon(adapted, settings)
+    adapted = _adapt_technical_tokens(adapted, settings, debug=debug)
     if settings.speech.spell_acronyms:
         adapted = _expand_acronyms(adapted)
     adapted = _restore_placeholders(adapted, placeholders)
@@ -98,7 +118,13 @@ def adapt_text_for_speech(text: str, settings: AppSettings) -> str:
     return adapted.strip()
 
 
-def adapt_text_to_speech_spans(text: str, settings: AppSettings, *, default_language: str = "es") -> list[SpeechSpan]:
+def adapt_text_to_speech_spans(
+    text: str,
+    settings: AppSettings,
+    *,
+    default_language: str = "es",
+    debug: TextProcessingDebug | None = None,
+) -> list[SpeechSpan]:
     if not text.strip():
         return []
 
@@ -109,11 +135,11 @@ def adapt_text_to_speech_spans(text: str, settings: AppSettings, *, default_lang
 
     for match in INLINE_ENGLISH.finditer(prepared):
         before = prepared[cursor:match.start()]
-        spans.extend(_build_speech_spans(before, settings, language=default_language, placeholders=placeholders))
-        spans.extend(_build_speech_spans(match.group(1), settings, language="en", placeholders=placeholders))
+        spans.extend(_build_speech_spans(before, settings, language=default_language, placeholders=placeholders, debug=debug))
+        spans.extend(_build_speech_spans(match.group(1), settings, language="en", placeholders=placeholders, debug=debug))
         cursor = match.end()
 
-    spans.extend(_build_speech_spans(prepared[cursor:], settings, language=default_language, placeholders=placeholders))
+    spans.extend(_build_speech_spans(prepared[cursor:], settings, language=default_language, placeholders=placeholders, debug=debug))
     return _merge_adjacent_spans(spans)
 
 
@@ -180,7 +206,19 @@ def segment_spans_for_tts(
     sentence_pause_ms: int,
     bilingual_transition_pause_ms: int,
     strip_terminal_periods: bool,
+    reading_mode: str = "standard",
+    min_segment_chars: int = 0,
 ) -> list[SpeechSpan | int]:
+    if reading_mode == "technical_paragraph":
+        return _segment_spans_for_technical_paragraph(
+            spans,
+            max_chars=max_chars,
+            sentence_pause_ms=sentence_pause_ms,
+            bilingual_transition_pause_ms=bilingual_transition_pause_ms,
+            strip_terminal_periods=strip_terminal_periods,
+            min_segment_chars=min_segment_chars,
+        )
+
     sequence: list[SpeechSpan | int] = []
     previous_language: str | None = None
     for span in spans:
@@ -204,6 +242,78 @@ def segment_spans_for_tts(
                 sequence.append(SpeechSpan(text=item, language=span.language))
         previous_language = span.language
     return sequence
+
+
+def _segment_spans_for_technical_paragraph(
+    spans: list[SpeechSpan],
+    *,
+    max_chars: int,
+    sentence_pause_ms: int,
+    bilingual_transition_pause_ms: int,
+    strip_terminal_periods: bool,
+    min_segment_chars: int,
+) -> list[SpeechSpan | int]:
+    sequence: list[SpeechSpan | int] = []
+    pending_pause = 0
+    previous_language: str | None = None
+
+    for span in spans:
+        transition_pause = 0
+        if (
+            previous_language is not None
+            and span.language != previous_language
+            and bilingual_transition_pause_ms > 0
+            and "en" in {previous_language, span.language}
+        ):
+            transition_pause = bilingual_transition_pause_ms
+
+        items = segment_text_for_tts(
+            span.text,
+            max_chars=max_chars,
+            sentence_pause_ms=sentence_pause_ms,
+            strip_terminal_periods=strip_terminal_periods,
+        )
+        span_sequence: list[SpeechSpan | int] = [
+            SpeechSpan(text=item, language=span.language) if isinstance(item, str) else item for item in items
+        ]
+
+        if transition_pause:
+            pending_pause = max(pending_pause, transition_pause)
+
+        for item in span_sequence:
+            if isinstance(item, int):
+                pending_pause = max(pending_pause, item)
+                continue
+            if _try_merge_short_segment(sequence, item, min_segment_chars=min_segment_chars, max_chars=max_chars):
+                pending_pause = 0
+                continue
+            if pending_pause > 0:
+                sequence.append(pending_pause)
+                pending_pause = 0
+            sequence.append(item)
+
+        previous_language = span.language
+
+    return sequence
+
+
+def _try_merge_short_segment(
+    sequence: list[SpeechSpan | int],
+    item: SpeechSpan,
+    *,
+    min_segment_chars: int,
+    max_chars: int,
+) -> bool:
+    if min_segment_chars <= 0 or len(item.text) >= min_segment_chars or not sequence:
+        return False
+    previous = sequence[-1]
+    if isinstance(previous, int) or previous.language != item.language:
+        return False
+    candidate = _cleanup_spacing(f"{previous.text} {item.text}")
+    if len(candidate) > max_chars:
+        return False
+    previous.text = candidate
+    return True
 
 
 def estimate_duration_seconds(text: str, speed: float) -> float:
@@ -281,13 +391,15 @@ def _restore_placeholders(text: str, placeholders: dict[str, str]) -> str:
     return restored
 
 
-def _adapt_technical_tokens(text: str, settings: AppSettings) -> str:
+def _adapt_technical_tokens(text: str, settings: AppSettings, *, debug: TextProcessingDebug | None = None) -> str:
     def replace(match: re.Match[str]) -> str:
         token = match.group(0)
         if not _looks_technical_token(token):
             return token
 
-        adapted = _adapt_technical_token(token, settings)
+        adapted, reason = _adapt_technical_token(token, settings)
+        if debug and adapted:
+            debug.add(token=token, output=adapted, reason=reason)
         return adapted or token
 
     return TECHNICAL_TOKEN.sub(replace, text)
@@ -299,6 +411,31 @@ def _apply_lexicon(text: str, lexicon: dict[str, str]) -> str:
         pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(source)}(?![A-Za-z0-9])", re.IGNORECASE)
         adapted = pattern.sub(lambda match: _preserve_case(match.group(0), target), adapted)
     return adapted
+
+
+def _apply_pronunciation_lexicon(text: str, settings: AppSettings) -> str:
+    adapted = text
+    for source, target in sorted(settings.speech.pronunciation_lexicon.items(), key=lambda item: len(item[0]), reverse=True):
+        if not _should_apply_pronunciation_entry(source, settings):
+            continue
+        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(source)}(?![A-Za-z0-9])", re.IGNORECASE)
+        adapted = pattern.sub(lambda match: _preserve_case(match.group(0), target), adapted)
+    return adapted
+
+
+def _should_apply_pronunciation_entry(source: str, settings: AppSettings) -> bool:
+    if settings.speech.adapt_plain_english_terms_with_lexicon:
+        return True
+    if any(char in source for char in "./_+-") or any(char.isdigit() for char in source):
+        return True
+    compact = source.replace(" ", "")
+    if compact.isupper() or (len(compact) <= 4 and compact.isalpha()):
+        return True
+    if any(char.isupper() for char in source):
+        return True
+    # Plain lowercase English terms often sound more natural when XTTS receives
+    # the real token instead of a Spanish phonetic approximation.
+    return False
 
 
 def _restore_spanish_accents(text: str, accent_lexicon: dict[str, str]) -> str:
@@ -333,24 +470,36 @@ def _looks_technical_token(token: str) -> bool:
     return has_separator or (has_digits and (has_upper or has_lower)) or (has_upper and has_lower)
 
 
-def _adapt_technical_token(token: str, settings: AppSettings) -> str:
+def _adapt_technical_token(token: str, settings: AppSettings) -> tuple[str, str]:
     direct = _lexicon_lookup(token, settings.speech.pronunciation_lexicon)
     if direct:
-        return _preserve_case(token, direct)
+        if _should_apply_pronunciation_entry(token, settings):
+            return _preserve_case(token, direct), "pronunciation_lexicon"
+        return token, "preserved_plain_english_token"
 
     parts = [part for part in CAMEL_OR_DIGIT_BOUNDARY.split(token) if part]
     expanded_parts: list[str] = []
     for part in parts:
         expanded_parts.extend(subpart for subpart in re.split(r"[./_]", part) if subpart)
 
-    spoken_parts = [_adapt_technical_part(part, settings, from_compound=len(expanded_parts) > 1) for part in expanded_parts]
+    if (
+        settings.speech.technical_adaptation_aggressiveness == "conservative"
+        and len(expanded_parts) <= 1
+        and _looks_like_english_phrase_token(token)
+    ):
+        return token, "preserved_technical_token"
+
+    spoken_parts = [
+        _adapt_technical_part(part, settings, from_compound=len(expanded_parts) > 1) for part in expanded_parts
+    ]
     spoken_parts = [part for part in spoken_parts if part]
-    return " ".join(spoken_parts).strip()
+    spoken = " ".join(spoken_parts).strip()
+    return spoken, "technical_token_policy"
 
 
 def _adapt_technical_part(part: str, settings: AppSettings, *, from_compound: bool = False) -> str:
     direct = _lexicon_lookup(part, settings.speech.pronunciation_lexicon)
-    if direct:
+    if direct and _should_apply_pronunciation_entry(part, settings):
         return _preserve_case(part, direct)
     if part.isdigit():
         return _pronounce_number_token(part)
@@ -358,13 +507,17 @@ def _adapt_technical_part(part: str, settings: AppSettings, *, from_compound: bo
         return " ".join(LETTER_PRONUNCIATION[char] for char in part if char in LETTER_PRONUNCIATION)
     if from_compound and part.isalpha() and len(part) <= 3:
         return " ".join(LETTER_PRONUNCIATION[char] for char in part.upper() if char in LETTER_PRONUNCIATION)
-    if from_compound and part.isalpha():
+    if settings.speech.technical_adaptation_aggressiveness == "aggressive" and from_compound and part.isalpha():
         return _spanglishify_word(part)
-    if any(char.isupper() for char in part):
+    if settings.speech.technical_adaptation_aggressiveness == "aggressive" and any(char.isupper() for char in part):
         return _spanglishify_word(part)
-    if any(char.isdigit() for char in part):
+    if settings.speech.technical_adaptation_aggressiveness == "aggressive" and any(char.isdigit() for char in part):
         return _spanglishify_word(part)
     return part
+
+
+def _looks_like_english_phrase_token(token: str) -> bool:
+    return token.isalpha() and any(char.isupper() for char in token) and any(char.islower() for char in token)
 
 
 def _pronounce_number_token(token: str) -> str:
@@ -380,9 +533,17 @@ def _lexicon_lookup(token: str, lexicon: dict[str, str]) -> str | None:
 
 
 def _adapt_english_phrase(text: str, settings: AppSettings) -> str:
-    adapted = _apply_lexicon(text, settings.speech.pronunciation_lexicon)
-    if settings.speech.spell_acronyms:
+    if settings.speech.preserve_english_spans:
+        return _cleanup_spacing(text)
+
+    adapted = text
+    if settings.speech.adapt_english_spans_with_lexicon:
+        adapted = _apply_lexicon(adapted, settings.speech.pronunciation_lexicon)
+    if settings.speech.spell_acronyms and settings.speech.pronunciation_mode == "aggressive":
         adapted = _expand_acronyms(adapted)
+
+    if not settings.speech.spanglishify_english_spans:
+        return _cleanup_spacing(adapted)
 
     def replace(match: re.Match[str]) -> str:
         return _spanglishify_word(match.group(0))
@@ -396,6 +557,7 @@ def _build_speech_spans(
     *,
     language: str,
     placeholders: dict[str, str],
+    debug: TextProcessingDebug | None = None,
 ) -> list[SpeechSpan]:
     cleaned = text.strip()
     if not cleaned:
@@ -409,7 +571,7 @@ def _build_speech_spans(
         restored = _restore_placeholders(_cleanup_spacing(cleaned), placeholders)
         return [SpeechSpan(text=restored, language="en")] if restored else []
 
-    adapted = adapt_text_for_speech(cleaned, settings)
+    adapted = _adapt_text_for_speech(cleaned, settings, debug=debug)
     adapted = _restore_placeholders(adapted, placeholders)
     adapted = _cleanup_spacing(adapted)
     return [SpeechSpan(text=adapted, language=language)] if adapted else []

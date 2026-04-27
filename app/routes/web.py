@@ -9,10 +9,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 
 from app.config.settings import AppSettings
-from app.models.domain import GenerationOptions, HistoryItem, Playlist
+from app.models.domain import BlockType, GenerationOptions, HistoryItem, Playlist, SpeechSpan
 from app.utils.files import safe_name
 from app.utils.system import has_ffmpeg
 from app.utils.text_parser import parse_input_document
+from app.utils.text_processing import TextProcessingDebug, segment_spans_for_tts
 
 
 router = APIRouter()
@@ -114,7 +115,9 @@ async def preview_text(request: Request) -> JSONResponse:
     variant = str(form.get("variant") or settings.default_variant)
     if variant not in settings.variants:
         variant = settings.default_variant
+    segment_length = max(120, min(int(form.get("segment_length") or settings.default_segment_length), 450))
 
+    debug = TextProcessingDebug()
     document = parse_input_document(
         text_input,
         settings=settings,
@@ -122,25 +125,98 @@ async def preview_text(request: Request) -> JSONResponse:
         selected_voice=str(form.get("voice_name") or "").strip() or None,
         selected_english_voice=str(form.get("english_voice_name") or "").strip() or None,
         source_filename=source_filename,
+        debug=debug,
     )
     preview_lines: list[str] = []
     blocks_payload: list[dict[str, object]] = []
+    segments_payload: list[dict[str, object]] = []
     for block in document.blocks:
         if block.text:
             preview_lines.append(block.text)
-            blocks_payload.append({"kind": block.kind.value, "text": block.text})
+            blocks_payload.append(
+                {
+                    "kind": block.kind.value,
+                    "text": block.text,
+                    "spans": [{"language": span.language, "text": span.text} for span in block.spans],
+                }
+            )
+            segments_payload.extend(_preview_segments(block.spans, settings, segment_length=segment_length))
         elif block.pause_ms is not None:
             preview_lines.append(f"[PAUSA {block.pause_ms} ms]")
             blocks_payload.append({"kind": block.kind.value, "pause_ms": block.pause_ms})
+            segments_payload.append({"kind": "pause", "pause_ms": block.pause_ms, "source": "block"})
+
+    debug_payload = {
+        "reading_mode": settings.audio_tuning.reading_mode,
+        "spans": [
+            {"language": span.language, "text": span.text}
+            for block in document.blocks
+            for span in block.spans
+            if block.kind == BlockType.text
+        ],
+        "segments": segments_payload,
+        "transformations": debug.transformations,
+    }
+    debug_text = "\n\n[DEBUG TTS]\n" + _format_preview_debug(debug_payload)
 
     return JSONResponse(
         {
             "title": document.title,
             "variant": document.variant,
-            "preview_text": "\n\n".join(preview_lines).strip(),
+            "preview_text": ("\n\n".join(preview_lines).strip() + debug_text).strip(),
             "blocks": blocks_payload,
+            "debug": debug_payload,
         }
     )
+
+
+def _preview_segments(
+    spans: list[SpeechSpan],
+    settings: AppSettings,
+    *,
+    segment_length: int,
+) -> list[dict[str, object]]:
+    sequence = segment_spans_for_tts(
+        spans,
+        max_chars=segment_length,
+        sentence_pause_ms=settings.audio_tuning.sentence_pause_ms,
+        bilingual_transition_pause_ms=(
+            settings.audio_tuning.technical_bilingual_transition_pause_ms
+            if settings.audio_tuning.reading_mode == "technical_paragraph"
+            else settings.audio_tuning.bilingual_transition_pause_ms
+        ),
+        strip_terminal_periods=settings.audio_tuning.strip_terminal_periods,
+        reading_mode=settings.audio_tuning.reading_mode,
+        min_segment_chars=settings.audio_tuning.min_segment_chars,
+    )
+    payload: list[dict[str, object]] = []
+    for item in sequence:
+        if isinstance(item, int):
+            payload.append({"kind": "pause", "pause_ms": item, "source": "segmenter"})
+        else:
+            payload.append({"kind": "speech", "language": item.language, "text": item.text})
+    return payload
+
+
+def _format_preview_debug(payload: dict[str, object]) -> str:
+    lines = [f"reading_mode: {payload['reading_mode']}"]
+    lines.append("spans:")
+    for span in payload["spans"]:  # type: ignore[index]
+        lines.append(f"- [{span['language']}] {span['text']}")  # type: ignore[index]
+    lines.append("segmentos:")
+    for segment in payload["segments"]:  # type: ignore[index]
+        if segment["kind"] == "pause":  # type: ignore[index]
+            lines.append(f"- [PAUSA] {segment['pause_ms']} ms ({segment['source']})")  # type: ignore[index]
+        else:
+            lines.append(f"- [{segment['language']}] {segment['text']}")  # type: ignore[index]
+    lines.append("transformaciones:")
+    transformations = payload["transformations"]  # type: ignore[index]
+    if transformations:
+        for item in transformations:
+            lines.append(f"- {item['token']} -> {item['output']} ({item['reason']})")
+    else:
+        lines.append("- ninguna")
+    return "\n".join(lines)
 
 
 @router.post("/playlists")

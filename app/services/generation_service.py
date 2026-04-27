@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.config.settings import AppSettings
 from app.models.domain import BlockType, GenerationOptions, HistoryItem, JobStatus, ParsedDocument, SpeechSpan
-from app.services.audio_pipeline import AudioPipeline
+from app.services.audio_pipeline import AudioPipeline, RenderedAudioSegment
 from app.services.base import BaseTTSService
 from app.services.history_service import HistoryService
 from app.services.job_manager import JobManager
@@ -86,7 +86,7 @@ class GenerationService:
             job_temp_dir = self._settings.temp_path / job_id
             job_temp_dir.mkdir(parents=True, exist_ok=True)
 
-            audio_sequence: list[Path | int] = []
+            audio_sequence: list[RenderedAudioSegment | int] = []
             rendered_segments = 0
             for index, item in enumerate(sequence_plan, start=1):
                 progress = 10 + int((index - 1) / total_steps * 75)
@@ -123,7 +123,7 @@ class GenerationService:
                         else options.temperature
                     ),
                 )
-                audio_sequence.append(segment_path)
+                audio_sequence.append(RenderedAudioSegment(path=segment_path, language=item.language))
                 cooldown_seconds = self._segment_cooldown_seconds()
                 if cooldown_seconds > 0 and index < total_steps:
                     await asyncio.sleep(cooldown_seconds)
@@ -215,11 +215,18 @@ class GenerationService:
                         block.spans,
                         max_chars=segment_length,
                         sentence_pause_ms=self._settings.audio_tuning.sentence_pause_ms,
-                        bilingual_transition_pause_ms=self._settings.audio_tuning.bilingual_transition_pause_ms,
+                        bilingual_transition_pause_ms=self._bilingual_transition_pause_ms(),
                         strip_terminal_periods=self._settings.audio_tuning.strip_terminal_periods,
+                        reading_mode=self._settings.audio_tuning.reading_mode,
+                        min_segment_chars=self._settings.audio_tuning.min_segment_chars,
                     )
                 )
         return sequence
+
+    def _bilingual_transition_pause_ms(self) -> int:
+        if self._settings.audio_tuning.reading_mode == "technical_paragraph":
+            return self._settings.audio_tuning.technical_bilingual_transition_pause_ms
+        return self._settings.audio_tuning.bilingual_transition_pause_ms
 
     def _segment_cooldown_seconds(self) -> float:
         if not self._settings.eco_mode.enabled:

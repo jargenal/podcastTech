@@ -47,6 +47,12 @@
   "speech": {
     "enabled": true,
     "spell_acronyms": true,
+    "pronunciation_mode": "conservative",
+    "technical_adaptation_aggressiveness": "conservative",
+    "preserve_english_spans": true,
+    "adapt_english_spans_with_lexicon": false,
+    "spanglishify_english_spans": false,
+    "adapt_plain_english_terms_with_lexicon": false,
     "restore_spanish_accents": true,
     "pronunciation_lexicon_overrides_file": "app/config/lexicons/pronunciation_overrides.json",
     "accent_lexicon_overrides_file": "app/config/lexicons/accent_overrides.json"
@@ -58,10 +64,16 @@
     "inter_segment_cooldown_ms": 250
   },
   "audio_tuning": {
+    "reading_mode": "technical_paragraph",
     "sentence_pause_ms": 220,
     "segment_fade_ms": 28,
+    "short_segment_fade_ms": 8,
     "crossfade_ms": 18,
+    "same_language_crossfade_ms": 12,
+    "bilingual_crossfade_ms": 0,
     "bilingual_transition_pause_ms": 120,
+    "technical_bilingual_transition_pause_ms": 70,
+    "min_segment_chars": 70,
     "strip_terminal_periods": true
   }
 }

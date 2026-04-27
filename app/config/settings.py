@@ -37,6 +37,21 @@ def _relative_to_root(path: Path) -> str:
 class SpeechConfig(BaseModel):
     enabled: bool = True
     spell_acronyms: bool = True
+    pronunciation_mode: Literal["conservative", "aggressive"] = Field(
+        "conservative",
+        description="Conservative avoids phonetic rewrites unless a token clearly benefits from adaptation.",
+    )
+    technical_adaptation_aggressiveness: Literal["conservative", "balanced", "aggressive"] = Field(
+        "conservative",
+        description="Controls how strongly camelCase, dotted, slash and mixed technical tokens are rewritten.",
+    )
+    preserve_english_spans: bool = Field(True, description="Keep [EN] spans as real English text for the TTS model.")
+    adapt_english_spans_with_lexicon: bool = Field(False, description="Apply pronunciation lexicon inside [EN] spans.")
+    spanglishify_english_spans: bool = Field(False, description="Apply legacy phonetic English-to-Spanish rewriting.")
+    adapt_plain_english_terms_with_lexicon: bool = Field(
+        False,
+        description="Rewrite lowercase English technical words such as backend/cache using the pronunciation lexicon.",
+    )
     pronunciation_lexicon_overrides_file: str = Field(
         default_factory=lambda: _relative_to_root(PRONUNCIATION_OVERRIDES_PATH)
     )
@@ -68,10 +83,19 @@ class EcoModeConfig(BaseModel):
 
 
 class AudioTuningConfig(BaseModel):
+    reading_mode: Literal["standard", "technical_paragraph"] = Field(
+        "technical_paragraph",
+        description="technical_paragraph favors longer fluent chunks and fewer pauses for bilingual technical prose.",
+    )
     sentence_pause_ms: int = 220
     segment_fade_ms: int = 28
+    short_segment_fade_ms: int = Field(8, description="Max fade for very short segments to avoid losing consonants.")
     crossfade_ms: int = 18
+    same_language_crossfade_ms: int | None = Field(12, description="Crossfade used only between same-language audio.")
+    bilingual_crossfade_ms: int = Field(0, description="Crossfade for language switches; 0 preserves word edges.")
     bilingual_transition_pause_ms: int = 120
+    technical_bilingual_transition_pause_ms: int = Field(70, description="Short pause for Spanish/English transitions.")
+    min_segment_chars: int = Field(70, description="Short same-language chunks below this size are merged when possible.")
     strip_terminal_periods: bool = True
 
 
