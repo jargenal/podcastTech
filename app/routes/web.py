@@ -204,7 +204,7 @@ def _preview_segments(
             if settings.audio_tuning.reading_mode == "technical_paragraph"
             else settings.audio_tuning.bilingual_transition_pause_ms
         ),
-        strip_terminal_periods=settings.audio_tuning.strip_terminal_periods,
+        strip_terminal_periods=False if settings.audio_tuning.preserve_terminal_punctuation else settings.audio_tuning.strip_terminal_periods,
         reading_mode=settings.audio_tuning.reading_mode,
         min_segment_chars=settings.audio_tuning.min_segment_chars,
         settings=settings,
@@ -274,6 +274,8 @@ def _format_preview_debug(payload: dict[str, object]) -> str:
     if technical_tokens:
         for item in technical_tokens:
             lines.append(f"- {item['token']} -> {item['output']} ({item['reason']})")
+            for part in item.get("parts") or []:
+                lines.append(f"  - {part['input']} -> {part['output']} ({part['strategy']})")
     else:
         lines.append("- ninguno")
     return "\n".join(lines)

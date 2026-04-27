@@ -45,6 +45,50 @@ TECHNICAL_ANCHOR_WORDS = {
     "uoch",
     "identity",
     "center",
+    "github",
+    "gateway",
+    "rest",
+    "url",
+    "json",
+    "http",
+    "https",
+    "id",
+    "key",
+    "name",
+    "image",
+    "refresh",
+    "access",
+    "episode",
+    "user",
+    "profile",
+}
+TECHNICAL_COMPONENT_PRONUNCIATIONS = {
+    "api": "ei pi ai",
+    "rest": "rest",
+    "http": "eich ti ti pi",
+    "https": "eich ti ti pi es",
+    "json": "yei son",
+    "url": "iu ar el",
+    "uri": "iu ar ai",
+    "id": "aidí",
+    "ids": "ai di es",
+    "key": "key",
+    "access": "access",
+    "episode": "episode",
+    "user": "user",
+    "name": "name",
+    "refresh": "refresh",
+    "token": "token",
+    "profile": "profile",
+    "image": "image",
+    "gateway": "gateway",
+    "github": "guit jab",
+    "cloud": "Cloud",
+    "watch": "Watch",
+}
+ALPHANUMERIC_ACRONYM_PRONUNCIATIONS = {
+    "s3": "es tri",
+    "ec2": "i si tú",
 }
 LETTER_PRONUNCIATION = {
     "A": "ei",
@@ -93,17 +137,27 @@ if TYPE_CHECKING:
 
 @dataclass
 class TextProcessingDebug:
-    transformations: list[dict[str, str]] = field(default_factory=list)
-    technical_tokens: list[dict[str, str]] = field(default_factory=list)
+    transformations: list[dict[str, object]] = field(default_factory=list)
+    technical_tokens: list[dict[str, object]] = field(default_factory=list)
     protected_zones: list[dict[str, object]] = field(default_factory=list)
     segmentation_events: list[dict[str, object]] = field(default_factory=list)
     segment_merges: list[dict[str, object]] = field(default_factory=list)
     sensitive_segments: list[dict[str, object]] = field(default_factory=list)
 
-    def add(self, *, token: str, output: str, reason: str) -> None:
-        self.technical_tokens.append({"token": token, "output": output, "reason": reason})
+    def add(
+        self,
+        *,
+        token: str,
+        output: str,
+        reason: str,
+        parts: list[dict[str, str]] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {"token": token, "output": output, "reason": reason}
+        if parts:
+            payload["parts"] = parts
+        self.technical_tokens.append(payload)
         if token != output:
-            self.transformations.append({"token": token, "output": output, "reason": reason})
+            self.transformations.append(payload)
 
     def add_protected_zone(self, payload: dict[str, object]) -> None:
         self.protected_zones.append(payload)
@@ -161,7 +215,7 @@ def _adapt_text_for_speech(text: str, settings: AppSettings, *, debug: TextProce
         adapted = _restore_spanish_accents(adapted, settings.speech.accent_lexicon)
     adapted = _extract_inline_pronunciations(adapted, placeholders)
     adapted = _extract_english_spans(adapted, placeholders, settings)
-    adapted = _apply_pronunciation_lexicon(adapted, settings)
+    adapted = _apply_pronunciation_lexicon(adapted, settings, debug=debug)
     adapted = _adapt_technical_tokens(adapted, settings, debug=debug)
     if settings.speech.spell_acronyms:
         adapted = _expand_acronyms(adapted)
@@ -722,9 +776,9 @@ def _adapt_technical_tokens(text: str, settings: AppSettings, *, debug: TextProc
         if not _looks_technical_token(token):
             return token
 
-        adapted, reason = _adapt_technical_token(token, settings)
+        adapted, reason, parts = _adapt_technical_token(token, settings)
         if debug and adapted:
-            debug.add(token=token, output=adapted, reason=reason)
+            debug.add(token=token, output=adapted, reason=reason, parts=parts)
         return adapted or token
 
     return TECHNICAL_TOKEN.sub(replace, text)
@@ -738,19 +792,35 @@ def _apply_lexicon(text: str, lexicon: dict[str, str]) -> str:
     return adapted
 
 
-def _apply_pronunciation_lexicon(text: str, settings: AppSettings) -> str:
+def _apply_pronunciation_lexicon(
+    text: str,
+    settings: AppSettings,
+    *,
+    debug: TextProcessingDebug | None = None,
+) -> str:
     adapted = text
     for source, target in sorted(settings.speech.pronunciation_lexicon.items(), key=lambda item: len(item[0]), reverse=True):
         if not _should_apply_pronunciation_entry(source, settings):
             continue
         pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(source)}(?![A-Za-z0-9])", re.IGNORECASE)
-        adapted = pattern.sub(lambda match: _preserve_case(match.group(0), target), adapted)
+
+        def replace(match: re.Match[str]) -> str:
+            output = _preserve_case(match.group(0), target)
+            if debug:
+                reason = "pronunciation_lexicon_phrase" if " " in source else "pronunciation_lexicon"
+                debug.add(token=match.group(0), output=output, reason=reason)
+            return output
+
+        adapted = pattern.sub(replace, adapted)
     return adapted
 
 
 def _should_apply_pronunciation_entry(source: str, settings: AppSettings) -> bool:
     if settings.speech.adapt_plain_english_terms_with_lexicon:
         return True
+    if " " in source:
+        parts = [part.casefold() for part in source.split()]
+        return any(part in TECHNICAL_ANCHOR_WORDS or len(part) <= 4 for part in parts)
     if any(char in source for char in "./_+-") or any(char.isdigit() for char in source):
         return True
     compact = source.replace(" ", "")
@@ -795,14 +865,18 @@ def _looks_technical_token(token: str) -> bool:
     return has_separator or (has_digits and (has_upper or has_lower)) or (has_upper and has_lower)
 
 
-def _adapt_technical_token(token: str, settings: AppSettings) -> tuple[str, str]:
+def _adapt_technical_token(token: str, settings: AppSettings) -> tuple[str, str, list[dict[str, str]]]:
     direct = _lexicon_lookup(token, settings.speech.pronunciation_lexicon)
     if direct:
         if _should_apply_pronunciation_entry(token, settings):
-            return _preserve_case(token, direct), "pronunciation_lexicon"
-        return token, "preserved_plain_english_token"
+            return _preserve_case(token, direct), "pronunciation_lexicon", [{"input": token, "output": direct, "strategy": "lexicon"}]
+        return token, "preserved_plain_english_token", [{"input": token, "output": token, "strategy": "preserved"}]
 
-    parts = [part for part in CAMEL_OR_DIGIT_BOUNDARY.split(token) if part]
+    alphanumeric = _adapt_alphanumeric_acronym(token, settings)
+    if alphanumeric:
+        return alphanumeric, "alphanumeric_acronym", [{"input": token, "output": alphanumeric, "strategy": settings.speech.alphanumeric_acronym_mode}]
+
+    parts = _split_technical_identifier(token)
     expanded_parts: list[str] = []
     for part in parts:
         expanded_parts.extend(subpart for subpart in re.split(r"[./_]", part) if subpart)
@@ -812,33 +886,75 @@ def _adapt_technical_token(token: str, settings: AppSettings) -> tuple[str, str]
         and len(expanded_parts) <= 1
         and _looks_like_english_phrase_token(token)
     ):
-        return token, "preserved_technical_token"
+        return token, "preserved_technical_token", [{"input": token, "output": token, "strategy": "preserved"}]
 
-    spoken_parts = [
-        _adapt_technical_part(part, settings, from_compound=len(expanded_parts) > 1) for part in expanded_parts
-    ]
+    part_payloads: list[dict[str, str]] = []
+    spoken_parts: list[str] = []
+    for part in expanded_parts:
+        spoken, strategy = _adapt_technical_part(part, settings, from_compound=len(expanded_parts) > 1)
+        if spoken:
+            spoken_parts.append(spoken)
+        part_payloads.append({"input": part, "output": spoken or part, "strategy": strategy})
     spoken_parts = [part for part in spoken_parts if part]
     spoken = " ".join(spoken_parts).strip()
-    return spoken, "technical_token_policy"
+    return spoken, "technical_token_policy", part_payloads
 
 
-def _adapt_technical_part(part: str, settings: AppSettings, *, from_compound: bool = False) -> str:
+def _split_technical_identifier(token: str) -> list[str]:
+    base_parts: list[str] = []
+    for chunk in re.split(r"([./_])", token):
+        if not chunk or chunk in "./_":
+            continue
+        base_parts.extend(part for part in CAMEL_OR_DIGIT_BOUNDARY.split(chunk) if part)
+    return base_parts or [token]
+
+
+def _adapt_alphanumeric_acronym(token: str, settings: AppSettings) -> str | None:
+    lowered = token.casefold()
+    if lowered in ALPHANUMERIC_ACRONYM_PRONUNCIATIONS and settings.speech.alphanumeric_acronym_mode == "lexicon":
+        return ALPHANUMERIC_ACRONYM_PRONUNCIATIONS[lowered]
+    match = re.fullmatch(r"([A-Z]{1,4})(\d+)", token)
+    if not match:
+        return None
+    letters, digits = match.groups()
+    spoken_letters = " ".join(LETTER_PRONUNCIATION[char] for char in letters if char in LETTER_PRONUNCIATION)
+    spoken_digits = _pronounce_number_token(digits)
+    return " ".join(part for part in [spoken_letters, spoken_digits] if part).strip()
+
+
+def _adapt_technical_part(part: str, settings: AppSettings, *, from_compound: bool = False) -> tuple[str, str]:
+    if from_compound:
+        component = _component_pronunciation(part, settings)
+        if component:
+            return component, "technical_component"
     direct = _lexicon_lookup(part, settings.speech.pronunciation_lexicon)
     if direct and _should_apply_pronunciation_entry(part, settings):
-        return _preserve_case(part, direct)
+        return _preserve_case(part, direct), "lexicon"
+    component = _component_pronunciation(part, settings)
+    if component:
+        return component, "technical_component"
     if part.isdigit():
-        return _pronounce_number_token(part)
+        return _pronounce_number_token(part), "number"
     if part.isupper() and len(part) >= 2:
-        return " ".join(LETTER_PRONUNCIATION[char] for char in part if char in LETTER_PRONUNCIATION)
+        return " ".join(LETTER_PRONUNCIATION[char] for char in part if char in LETTER_PRONUNCIATION), "acronym"
     if from_compound and part.isalpha() and len(part) <= 3:
-        return " ".join(LETTER_PRONUNCIATION[char] for char in part.upper() if char in LETTER_PRONUNCIATION)
+        return " ".join(LETTER_PRONUNCIATION[char] for char in part.upper() if char in LETTER_PRONUNCIATION), "short_component_spelled"
     if settings.speech.technical_adaptation_aggressiveness == "aggressive" and from_compound and part.isalpha():
-        return _spanglishify_word(part)
+        return _spanglishify_word(part), "aggressive_phonetic"
     if settings.speech.technical_adaptation_aggressiveness == "aggressive" and any(char.isupper() for char in part):
-        return _spanglishify_word(part)
+        return _spanglishify_word(part), "aggressive_phonetic"
     if settings.speech.technical_adaptation_aggressiveness == "aggressive" and any(char.isdigit() for char in part):
-        return _spanglishify_word(part)
-    return part
+        return _spanglishify_word(part), "aggressive_phonetic"
+    return part, "preserved_component"
+
+
+def _component_pronunciation(part: str, settings: AppSettings) -> str | None:
+    lowered = part.casefold()
+    if lowered == "id" and settings.speech.mixed_case_id_pronunciation == "spelled":
+        return "ai di"
+    if settings.speech.technical_verbalization_mode == "expanded":
+        return TECHNICAL_COMPONENT_PRONUNCIATIONS.get(lowered)
+    return None
 
 
 def _looks_like_english_phrase_token(token: str) -> bool:

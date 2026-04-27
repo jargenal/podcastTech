@@ -27,9 +27,9 @@ class TextProcessingTestCase(unittest.TestCase):
     def test_common_cloud_terms_use_runtime_overrides(self) -> None:
         adapted = adapt_text_for_speech(normalize_text("CloudWatch protege datos en S3 y EC2."), self.settings)
         lowered = adapted.casefold()
-        self.assertIn("claud uoch", lowered)
+        self.assertIn("cloud watch", lowered)
         self.assertIn("es tri", lowered)
-        self.assertIn("i si tu", lowered)
+        self.assertIn("i si tú", lowered)
 
     def test_dot_notation_terms_are_adapted(self) -> None:
         adapted = adapt_text_for_speech(normalize_text("Node.js y Next.js corren en local."), self.settings)
@@ -41,8 +41,8 @@ class TextProcessingTestCase(unittest.TestCase):
         adapted = adapt_text_for_speech(normalize_text("La AccessKeyId se rota automaticamente."), self.settings)
         lowered = adapted.casefold()
         self.assertIn("access", lowered)
-        self.assertIn("kei", lowered)
-        self.assertIn("ai di", lowered)
+        self.assertIn("key", lowered)
+        self.assertIn("aidí", lowered)
 
     def test_parser_applies_adaptation_inside_text_blocks(self) -> None:
         document = parse_input_document(
@@ -229,6 +229,51 @@ class TextProcessingTestCase(unittest.TestCase):
         self.assertTrue(speech_items[0].sensitive)
         self.assertIn("technical_anchor", speech_items[0].sensitivity_reasons)
 
+    def test_common_technical_phrase_lexicon_is_applied(self) -> None:
+        adapted, debug = self._adapt_debug("GitHub publica una REST API detrás de API Gateway y CloudWatch.")
+        lowered = adapted.casefold()
+        self.assertIn("guit jab", lowered)
+        self.assertIn("rest ei pi ai", lowered)
+        self.assertIn("ei pi ai gateway", lowered)
+        self.assertIn("cloud watch", lowered)
+        phrase_tokens = {item["token"].casefold(): item for item in debug.technical_tokens}
+        self.assertEqual(phrase_tokens["rest api"]["reason"], "pronunciation_lexicon_phrase")
+        self.assertEqual(phrase_tokens["api gateway"]["reason"], "pronunciation_lexicon_phrase")
+
+    def test_mixed_case_tokens_use_component_verbalization(self) -> None:
+        adapted, debug = self._adapt_debug("accessKeyId episodeId userName refreshToken profileImageURL")
+        lowered = adapted.casefold()
+        self.assertIn("access key aidí", lowered)
+        self.assertIn("episode aidí", lowered)
+        self.assertIn("user name", lowered)
+        self.assertIn("refresh token", lowered)
+        self.assertIn("profile image iu ar el", lowered)
+        token_map = {item["token"]: item for item in debug.technical_tokens}
+        self.assertEqual(token_map["episodeId"]["parts"][1]["output"], "aidí")
+        self.assertEqual(token_map["profileImageURL"]["parts"][2]["strategy"], "technical_component")
+
+    def test_alphanumeric_acronym_sequence_stays_articulated(self) -> None:
+        adapted, debug = self._adapt_debug("Usa S3, EC2, IAM para validar permisos.")
+        lowered = adapted.casefold()
+        self.assertIn("es tri, i si tú, ai em", lowered)
+        token_map = {item["token"]: item for item in debug.technical_tokens}
+        self.assertEqual(token_map["EC2"]["output"], "i si tú")
+
+    def test_terminal_punctuation_can_be_preserved_for_phrase_closure(self) -> None:
+        sequence = segment_spans_for_tts(
+            [self._span("El resultado queda inconsistente. Luego se valida después.", "es")],
+            max_chars=80,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=False,
+            reading_mode="technical_paragraph",
+            min_segment_chars=40,
+            settings=self.settings,
+        )
+        speech_items = [item for item in sequence if not isinstance(item, int)]
+        self.assertTrue(speech_items[0].text.endswith("."))
+        self.assertTrue(speech_items[-1].text.endswith("."))
+
     def test_parser_supports_optional_english_voice_tag(self) -> None:
         document = parse_input_document(
             "[VOZ_EN]\nenglish_voice.wav\n[TEXTO]\nHola [EN]cloud adoption[/EN].\n",
@@ -245,6 +290,11 @@ class TextProcessingTestCase(unittest.TestCase):
         from app.models.domain import SpeechSpan
 
         return SpeechSpan(text=text, language=language)
+
+    def _adapt_debug(self, text: str):
+        from app.utils.text_processing import adapt_text_for_speech_debug
+
+        return adapt_text_for_speech_debug(normalize_text(text), self.settings)
 
 
 if __name__ == "__main__":

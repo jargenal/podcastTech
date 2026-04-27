@@ -47,6 +47,9 @@
   "speech": {
     "enabled": true,
     "spell_acronyms": true,
+    "technical_verbalization_mode": "expanded",
+    "alphanumeric_acronym_mode": "lexicon",
+    "mixed_case_id_pronunciation": "compact",
     "pronunciation_mode": "conservative",
     "technical_adaptation_aggressiveness": "conservative",
     "preserve_english_spans": true,
@@ -67,6 +70,10 @@
     "reading_mode": "technical_paragraph",
     "sentence_pause_ms": 220,
     "segment_fade_ms": 28,
+    "segment_fade_in_ms": 6,
+    "segment_fade_out_ms": 0,
+    "terminal_segment_fade_out_ms": 0,
+    "terminal_segment_tail_silence_ms": 60,
     "short_segment_fade_ms": 8,
     "crossfade_ms": 18,
     "same_language_crossfade_ms": 12,
@@ -84,6 +91,7 @@
     "avoid_segment_break_before_technical_token": true,
     "protected_zone_max_overflow_chars": 80,
     "sensitive_segment_detection": true,
-    "strip_terminal_periods": true
+    "preserve_terminal_punctuation": true,
+    "strip_terminal_periods": false
   }
 }

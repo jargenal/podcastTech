@@ -37,6 +37,18 @@ def _relative_to_root(path: Path) -> str:
 class SpeechConfig(BaseModel):
     enabled: bool = True
     spell_acronyms: bool = True
+    technical_verbalization_mode: Literal["conservative", "expanded"] = Field(
+        "expanded",
+        description="expanded verbalizes mixedCase technical identifiers using reusable component rules.",
+    )
+    alphanumeric_acronym_mode: Literal["lexicon", "spell_letters_digits"] = Field(
+        "lexicon",
+        description="Controls how acronyms with digits such as S3 and EC2 are verbalized.",
+    )
+    mixed_case_id_pronunciation: Literal["compact", "spelled"] = Field(
+        "compact",
+        description="compact uses a joined pronunciation for Id suffixes to avoid artificial pauses.",
+    )
     pronunciation_mode: Literal["conservative", "aggressive"] = Field(
         "conservative",
         description="Conservative avoids phonetic rewrites unless a token clearly benefits from adaptation.",
@@ -89,6 +101,10 @@ class AudioTuningConfig(BaseModel):
     )
     sentence_pause_ms: int = 220
     segment_fade_ms: int = 28
+    segment_fade_in_ms: int = Field(6, description="Fade-in for rendered TTS chunks.")
+    segment_fade_out_ms: int = Field(0, description="Fade-out for rendered TTS chunks; 0 preserves final syllables.")
+    terminal_segment_fade_out_ms: int = Field(0, description="Fade-out at final/pause boundaries.")
+    terminal_segment_tail_silence_ms: int = Field(60, description="Small closure pad after terminal segments.")
     short_segment_fade_ms: int = Field(8, description="Max fade for very short segments to avoid losing consonants.")
     crossfade_ms: int = 18
     same_language_crossfade_ms: int | None = Field(12, description="Crossfade used only between same-language audio.")
@@ -124,7 +140,8 @@ class AudioTuningConfig(BaseModel):
         description="Allowed overflow beyond max segment length to keep protected technical islands together.",
     )
     sensitive_segment_detection: bool = True
-    strip_terminal_periods: bool = True
+    preserve_terminal_punctuation: bool = Field(True, description="Keep final punctuation to help TTS phrase closure.")
+    strip_terminal_periods: bool = False
 
 
 class AppSettings(BaseModel):

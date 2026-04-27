@@ -133,6 +133,7 @@ class GenerationService:
                         text=item.text,
                         sensitive=item.sensitive,
                         sensitivity_reasons=tuple(item.sensitivity_reasons),
+                        terminal=self._is_terminal_sequence_item(sequence_plan, index - 1),
                     )
                 )
                 cooldown_seconds = self._segment_cooldown_seconds()
@@ -243,7 +244,7 @@ class GenerationService:
                         max_chars=segment_length,
                         sentence_pause_ms=self._settings.audio_tuning.sentence_pause_ms,
                         bilingual_transition_pause_ms=self._bilingual_transition_pause_ms(),
-                        strip_terminal_periods=self._settings.audio_tuning.strip_terminal_periods,
+                        strip_terminal_periods=self._strip_terminal_periods(),
                         reading_mode=self._settings.audio_tuning.reading_mode,
                         min_segment_chars=self._settings.audio_tuning.min_segment_chars,
                         settings=self._settings,
@@ -256,6 +257,17 @@ class GenerationService:
         if self._settings.audio_tuning.reading_mode == "technical_paragraph":
             return self._settings.audio_tuning.technical_bilingual_transition_pause_ms
         return self._settings.audio_tuning.bilingual_transition_pause_ms
+
+    def _strip_terminal_periods(self) -> bool:
+        if self._settings.audio_tuning.preserve_terminal_punctuation:
+            return False
+        return self._settings.audio_tuning.strip_terminal_periods
+
+    def _is_terminal_sequence_item(self, sequence: list[SpeechSpan | int], index: int) -> bool:
+        if index >= len(sequence) - 1:
+            return True
+        next_item = sequence[index + 1]
+        return isinstance(next_item, int)
 
     def _segment_cooldown_seconds(self) -> float:
         if not self._settings.eco_mode.enabled:

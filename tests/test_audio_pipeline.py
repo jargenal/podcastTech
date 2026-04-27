@@ -53,6 +53,41 @@ class AudioPipelineTraceTestCase(unittest.TestCase):
             self.assertIn("start_ms", speech_items[1])
             self.assertIn("end_ms", speech_items[1])
 
+    def test_terminal_segment_trace_includes_tail_closure_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = AppSettings(variants=_default_variants(), output_dir=str(root))
+            pipeline = AudioPipeline(settings)
+
+            segment_path = root / "terminal.wav"
+            with AudioSegment.silent(duration=1000).export(segment_path, format="wav"):
+                pass
+
+            debug_path = root / "debug" / "terminal.json"
+            pipeline.assemble(
+                sequence=[
+                    RenderedAudioSegment(
+                        path=segment_path,
+                        language="es",
+                        order=1,
+                        text="El resultado queda inconsistente.",
+                        terminal=True,
+                    ),
+                ],
+                title="terminal trace",
+                normalize_audio=False,
+                export_mp3=False,
+                export_m4a=False,
+                debug_path=debug_path,
+                job_id="terminal",
+            )
+
+            payload = json.loads(debug_path.read_text(encoding="utf-8"))
+            speech_item = [item for item in payload["items"] if item["kind"] == "speech"][0]
+            self.assertTrue(speech_item["terminal"])
+            self.assertIn("tail_60ms", speech_item["fade_policy"])
+            self.assertEqual(speech_item["duration_ms"], 1060)
+
 
 if __name__ == "__main__":
     unittest.main()

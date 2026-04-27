@@ -21,6 +21,7 @@ class RenderedAudioSegment:
     text: str = ""
     sensitive: bool = False
     sensitivity_reasons: tuple[str, ...] = ()
+    terminal: bool = False
 
 
 class AudioPipeline:
@@ -67,7 +68,7 @@ class AudioPipeline:
                 with path.open("rb") as audio_file:
                     segment = AudioSegment.from_file(audio_file)
                 raw_duration_ms = len(segment)
-                segment = self._smooth_segment(segment, sensitive=rendered.sensitive)
+                segment = self._smooth_segment(segment, sensitive=rendered.sensitive, terminal=rendered.terminal)
                 join_strategy = self._join_strategy(previous_item, rendered)
                 if previous_item is not None and len(combined) > 0:
                     crossfade_ms = self._effective_crossfade_ms(combined, segment, previous_item, rendered)
@@ -90,13 +91,14 @@ class AudioPipeline:
                         "text": rendered.text,
                         "sensitive": rendered.sensitive,
                         "sensitivity_reasons": list(rendered.sensitivity_reasons),
+                        "terminal": rendered.terminal,
                         "raw_duration_ms": raw_duration_ms,
                         "duration_ms": len(segment),
                         "start_ms": start_ms,
                         "end_ms": len(combined),
                         "join_strategy": join_strategy,
                         "crossfade_ms": crossfade_ms,
-                        "fade_policy": self._fade_policy(rendered.sensitive, len(segment)),
+                        "fade_policy": self._fade_policy(rendered.sensitive, rendered.terminal, len(segment)),
                     }
                 )
                 previous_item = rendered
@@ -147,15 +149,28 @@ class AudioPipeline:
             )
         return OutputFiles(wav=wav_name, mp3=mp3_name, m4a=m4a_name), duration_seconds, warnings
 
-    def _smooth_segment(self, segment: AudioSegment, *, sensitive: bool) -> AudioSegment:
+    def _smooth_segment(self, segment: AudioSegment, *, sensitive: bool, terminal: bool) -> AudioSegment:
         if sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
-            return segment
-        fade_ms = self._settings.audio_tuning.segment_fade_ms
+            return self._with_terminal_tail(segment, terminal=terminal)
+        fade_in_ms = self._settings.audio_tuning.segment_fade_in_ms
+        fade_out_ms = (
+            self._settings.audio_tuning.terminal_segment_fade_out_ms
+            if terminal
+            else self._settings.audio_tuning.segment_fade_out_ms
+        )
+        if self._settings.audio_tuning.segment_fade_ms > 0:
+            fade_in_ms = min(fade_in_ms, self._settings.audio_tuning.segment_fade_ms)
+            fade_out_ms = min(fade_out_ms, self._settings.audio_tuning.segment_fade_ms)
         if len(segment) < 900:
-            fade_ms = min(fade_ms, self._settings.audio_tuning.short_segment_fade_ms)
-        if fade_ms <= 0 or len(segment) < fade_ms * 3:
-            return segment
-        return segment.fade_in(fade_ms).fade_out(fade_ms)
+            fade_in_ms = min(fade_in_ms, self._settings.audio_tuning.short_segment_fade_ms)
+            fade_out_ms = min(fade_out_ms, self._settings.audio_tuning.short_segment_fade_ms)
+        if len(segment) < max(fade_in_ms + fade_out_ms, 1) * 3:
+            return self._with_terminal_tail(segment, terminal=terminal)
+        if fade_in_ms > 0:
+            segment = segment.fade_in(fade_in_ms)
+        if fade_out_ms > 0:
+            segment = segment.fade_out(fade_out_ms)
+        return self._with_terminal_tail(segment, terminal=terminal)
 
     def _effective_crossfade_ms(
         self,
@@ -191,9 +206,24 @@ class AudioPipeline:
             return "sensitive_conservative"
         return self._settings.audio_tuning.segment_join_strategy
 
-    def _fade_policy(self, sensitive: bool, duration_ms: int) -> str:
+    def _fade_policy(self, sensitive: bool, terminal: bool, duration_ms: int) -> str:
+        tail = self._settings.audio_tuning.terminal_segment_tail_silence_ms if terminal else 0
         if sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
-            return "disabled_sensitive_segment"
+            return f"disabled_sensitive_segment_tail_{tail}ms" if tail else "disabled_sensitive_segment"
         if duration_ms < 900:
-            return f"short_segment_{self._settings.audio_tuning.short_segment_fade_ms}ms"
-        return f"default_{self._settings.audio_tuning.segment_fade_ms}ms"
+            return f"short_segment_{self._settings.audio_tuning.short_segment_fade_ms}ms_tail_{tail}ms"
+        fade_out = (
+            self._settings.audio_tuning.terminal_segment_fade_out_ms
+            if terminal
+            else self._settings.audio_tuning.segment_fade_out_ms
+        )
+        return (
+            f"in_{self._settings.audio_tuning.segment_fade_in_ms}ms_"
+            f"out_{fade_out}ms_tail_{tail}ms"
+        )
+
+    def _with_terminal_tail(self, segment: AudioSegment, *, terminal: bool) -> AudioSegment:
+        tail_ms = self._settings.audio_tuning.terminal_segment_tail_silence_ms if terminal else 0
+        if tail_ms <= 0:
+            return segment
+        return segment + AudioSegment.silent(duration=tail_ms)
