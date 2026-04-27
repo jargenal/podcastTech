@@ -13,7 +13,7 @@ from app.services.history_service import HistoryService
 from app.services.job_manager import JobManager
 from app.utils.files import safe_name
 from app.utils.text_parser import parse_input_document
-from app.utils.text_processing import estimate_duration_seconds, segment_spans_for_tts
+from app.utils.text_processing import TextProcessingDebug, estimate_duration_seconds, segment_spans_for_tts
 
 
 class GenerationService:
@@ -43,6 +43,7 @@ class GenerationService:
     ) -> None:
         try:
             await self._jobs.update_status(job_id, status=JobStatus.running, message="Preparando texto", progress=5)
+            text_debug = TextProcessingDebug()
             document = parse_input_document(
                 raw_text,
                 settings=self._settings,
@@ -50,6 +51,7 @@ class GenerationService:
                 selected_voice=options.speaker_wav,
                 selected_english_voice=options.english_speaker_wav,
                 source_filename=source_filename or title_hint,
+                debug=text_debug,
             )
             if not document.blocks:
                 raise RuntimeError("No se encontro contenido de texto utilizable para sintetizar.")
@@ -79,7 +81,7 @@ class GenerationService:
                     "Modo eco activo: limite de hilos aplicado y enfriamiento entre segmentos habilitado.",
                 )
 
-            sequence_plan = self._build_sequence(document, options.segment_length)
+            sequence_plan = self._build_sequence(document, options.segment_length, debug=text_debug)
             total_steps = max(len(sequence_plan), 1)
             await self._jobs.add_log(job_id, f"Plan de render: {total_steps} items entre segmentos y pausas.")
 
@@ -123,7 +125,16 @@ class GenerationService:
                         else options.temperature
                     ),
                 )
-                audio_sequence.append(RenderedAudioSegment(path=segment_path, language=item.language))
+                audio_sequence.append(
+                    RenderedAudioSegment(
+                        path=segment_path,
+                        language=item.language,
+                        order=rendered_segments,
+                        text=item.text,
+                        sensitive=item.sensitive,
+                        sensitivity_reasons=tuple(item.sensitivity_reasons),
+                    )
+                )
                 cooldown_seconds = self._segment_cooldown_seconds()
                 if cooldown_seconds > 0 and index < total_steps:
                     await asyncio.sleep(cooldown_seconds)
@@ -137,6 +148,16 @@ class GenerationService:
                 normalize_audio=options.normalize_audio,
                 export_mp3=options.export_mp3,
                 export_m4a=options.export_m4a,
+                debug_path=self._settings.output_path / "debug" / f"{job_id}.json",
+                job_id=job_id,
+                debug_metadata={
+                    "transformations": text_debug.transformations,
+                    "technical_tokens": text_debug.technical_tokens,
+                    "protected_zones": text_debug.protected_zones,
+                    "segmentation_events": text_debug.segmentation_events,
+                    "segment_merges": text_debug.segment_merges,
+                    "sensitive_segments": text_debug.sensitive_segments,
+                },
             )
 
             for warning in pipeline_warnings:
@@ -203,7 +224,13 @@ class GenerationService:
             return available_voices[0]
         return fallback
 
-    def _build_sequence(self, document: ParsedDocument, segment_length: int) -> list[SpeechSpan | int]:
+    def _build_sequence(
+        self,
+        document: ParsedDocument,
+        segment_length: int,
+        *,
+        debug: TextProcessingDebug | None = None,
+    ) -> list[SpeechSpan | int]:
         sequence: list[SpeechSpan | int] = []
         for block in document.blocks:
             if block.kind == BlockType.pause and block.pause_ms is not None:
@@ -219,6 +246,8 @@ class GenerationService:
                         strip_terminal_periods=self._settings.audio_tuning.strip_terminal_periods,
                         reading_mode=self._settings.audio_tuning.reading_mode,
                         min_segment_chars=self._settings.audio_tuning.min_segment_chars,
+                        settings=self._settings,
+                        debug=debug,
                     )
                 )
         return sequence

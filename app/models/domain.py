@@ -22,6 +22,8 @@ class BlockType(str, Enum):
 class SpeechSpan(BaseModel):
     text: str
     language: str = "es"
+    sensitive: bool = False
+    sensitivity_reasons: list[str] = Field(default_factory=list)
 
 
 class ParsedBlock(BaseModel):

@@ -93,9 +93,37 @@ class AudioTuningConfig(BaseModel):
     crossfade_ms: int = 18
     same_language_crossfade_ms: int | None = Field(12, description="Crossfade used only between same-language audio.")
     bilingual_crossfade_ms: int = Field(0, description="Crossfade for language switches; 0 preserves word edges.")
+    same_language_crossfade_for_sensitive_segments_ms: int = Field(
+        0,
+        description="Crossfade used when either side has fragile technical or bilingual content.",
+    )
+    disable_fades_for_sensitive_segments: bool = Field(
+        True,
+        description="Skip per-segment fades on fragile technical or bilingual segments.",
+    )
+    min_chars_for_crossfade: int = Field(95, description="Do not crossfade segments shorter than this text length.")
+    segment_join_strategy: Literal["conservative", "balanced"] = Field(
+        "conservative",
+        description="conservative preserves word edges; balanced allows more smoothing between ordinary segments.",
+    )
     bilingual_transition_pause_ms: int = 120
     technical_bilingual_transition_pause_ms: int = Field(70, description="Short pause for Spanish/English transitions.")
     min_segment_chars: int = Field(70, description="Short same-language chunks below this size are merged when possible.")
+    protected_token_context_words_before: int = Field(
+        2,
+        description="Words before a fragile technical token where segment breaks are avoided.",
+    )
+    protected_token_context_words_after: int = Field(
+        3,
+        description="Words after a fragile technical token where segment breaks are avoided.",
+    )
+    avoid_segment_break_after_technical_token: bool = True
+    avoid_segment_break_before_technical_token: bool = True
+    protected_zone_max_overflow_chars: int = Field(
+        80,
+        description="Allowed overflow beyond max segment length to keep protected technical islands together.",
+    )
+    sensitive_segment_detection: bool = True
     strip_terminal_periods: bool = True
 
 

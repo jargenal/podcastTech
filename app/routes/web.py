@@ -137,10 +137,18 @@ async def preview_text(request: Request) -> JSONResponse:
                 {
                     "kind": block.kind.value,
                     "text": block.text,
-                    "spans": [{"language": span.language, "text": span.text} for span in block.spans],
+                    "spans": [
+                        {
+                            "language": span.language,
+                            "text": span.text,
+                            "sensitive": span.sensitive,
+                            "sensitivity_reasons": span.sensitivity_reasons,
+                        }
+                        for span in block.spans
+                    ],
                 }
             )
-            segments_payload.extend(_preview_segments(block.spans, settings, segment_length=segment_length))
+            segments_payload.extend(_preview_segments(block.spans, settings, segment_length=segment_length, debug=debug))
         elif block.pause_ms is not None:
             preview_lines.append(f"[PAUSA {block.pause_ms} ms]")
             blocks_payload.append({"kind": block.kind.value, "pause_ms": block.pause_ms})
@@ -149,13 +157,23 @@ async def preview_text(request: Request) -> JSONResponse:
     debug_payload = {
         "reading_mode": settings.audio_tuning.reading_mode,
         "spans": [
-            {"language": span.language, "text": span.text}
+            {
+                "language": span.language,
+                "text": span.text,
+                "sensitive": span.sensitive,
+                "sensitivity_reasons": span.sensitivity_reasons,
+            }
             for block in document.blocks
             for span in block.spans
             if block.kind == BlockType.text
         ],
         "segments": segments_payload,
         "transformations": debug.transformations,
+        "technical_tokens": debug.technical_tokens,
+        "protected_zones": debug.protected_zones,
+        "segmentation_events": debug.segmentation_events,
+        "segment_merges": debug.segment_merges,
+        "sensitive_segments": debug.sensitive_segments,
     }
     debug_text = "\n\n[DEBUG TTS]\n" + _format_preview_debug(debug_payload)
 
@@ -175,6 +193,7 @@ def _preview_segments(
     settings: AppSettings,
     *,
     segment_length: int,
+    debug: TextProcessingDebug,
 ) -> list[dict[str, object]]:
     sequence = segment_spans_for_tts(
         spans,
@@ -188,13 +207,23 @@ def _preview_segments(
         strip_terminal_periods=settings.audio_tuning.strip_terminal_periods,
         reading_mode=settings.audio_tuning.reading_mode,
         min_segment_chars=settings.audio_tuning.min_segment_chars,
+        settings=settings,
+        debug=debug,
     )
     payload: list[dict[str, object]] = []
     for item in sequence:
         if isinstance(item, int):
             payload.append({"kind": "pause", "pause_ms": item, "source": "segmenter"})
         else:
-            payload.append({"kind": "speech", "language": item.language, "text": item.text})
+            payload.append(
+                {
+                    "kind": "speech",
+                    "language": item.language,
+                    "text": item.text,
+                    "sensitive": item.sensitive,
+                    "sensitivity_reasons": item.sensitivity_reasons,
+                }
+            )
     return payload
 
 
@@ -208,7 +237,31 @@ def _format_preview_debug(payload: dict[str, object]) -> str:
         if segment["kind"] == "pause":  # type: ignore[index]
             lines.append(f"- [PAUSA] {segment['pause_ms']} ms ({segment['source']})")  # type: ignore[index]
         else:
-            lines.append(f"- [{segment['language']}] {segment['text']}")  # type: ignore[index]
+            marker = " sensitive" if segment.get("sensitive") else ""  # type: ignore[attr-defined]
+            reasons = ", ".join(segment.get("sensitivity_reasons") or [])  # type: ignore[attr-defined]
+            suffix = f" ({reasons})" if reasons else ""
+            lines.append(f"- [{segment['language']}]{marker} {segment['text']}{suffix}")  # type: ignore[index]
+    lines.append("protected_zones:")
+    protected_zones = payload["protected_zones"]  # type: ignore[index]
+    if protected_zones:
+        for zone in protected_zones:
+            lines.append(f"- {zone['word']} [{zone['language']}] {', '.join(zone['reasons'])}")
+    else:
+        lines.append("- ninguna")
+    lines.append("segment_merges:")
+    segment_merges = payload["segment_merges"]  # type: ignore[index]
+    if segment_merges:
+        for merge in segment_merges:
+            lines.append(f"- {merge['reason']}: {merge['incoming_text']}")
+    else:
+        lines.append("- ninguno")
+    lines.append("no_cut_events:")
+    segmentation_events = payload["segmentation_events"]  # type: ignore[index]
+    if segmentation_events:
+        for event in segmentation_events:
+            lines.append(f"- {event['reason']}: {event['previous_word']} -> {event['next_word']}")
+    else:
+        lines.append("- ninguno")
     lines.append("transformaciones:")
     transformations = payload["transformations"]  # type: ignore[index]
     if transformations:
@@ -216,6 +269,13 @@ def _format_preview_debug(payload: dict[str, object]) -> str:
             lines.append(f"- {item['token']} -> {item['output']} ({item['reason']})")
     else:
         lines.append("- ninguna")
+    lines.append("tokens_tecnicos:")
+    technical_tokens = payload["technical_tokens"]  # type: ignore[index]
+    if technical_tokens:
+        for item in technical_tokens:
+            lines.append(f"- {item['token']} -> {item['output']} ({item['reason']})")
+    else:
+        lines.append("- ninguno")
     return "\n".join(lines)
 
 

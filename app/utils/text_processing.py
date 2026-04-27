@@ -16,9 +16,36 @@ BRACKETED_INLINE_TOKEN = re.compile(r"\[(?!/?(?:PRON|EN)\b)([A-Za-z0-9][A-Za-z0-
 ACRONYM_TOKEN = re.compile(r"\b[A-Z]{2,}(?:[/-][A-Z]{2,})*\b")
 WORD_TOKEN = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)*")
 TECHNICAL_TOKEN = re.compile(r"\b[A-Za-z0-9]+(?:[./_][A-Za-z0-9]+)*\b")
+WORD_WITH_SPAN = re.compile(r"\S+")
 CAMEL_OR_DIGIT_BOUNDARY = re.compile(
     r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])"
 )
+TECHNICAL_ANCHOR_WORDS = {
+    "api",
+    "apis",
+    "sdk",
+    "aws",
+    "iam",
+    "mfa",
+    "s3",
+    "ec2",
+    "backend",
+    "frontend",
+    "cloudwatch",
+    "session",
+    "token",
+    "sessiontoken",
+    "endpoint",
+    "webhook",
+    "workflow",
+    "pipeline",
+    "deploy",
+    "cache",
+    "claud",
+    "uoch",
+    "identity",
+    "center",
+}
 LETTER_PRONUNCIATION = {
     "A": "ei",
     "B": "bi",
@@ -67,10 +94,36 @@ if TYPE_CHECKING:
 @dataclass
 class TextProcessingDebug:
     transformations: list[dict[str, str]] = field(default_factory=list)
+    technical_tokens: list[dict[str, str]] = field(default_factory=list)
+    protected_zones: list[dict[str, object]] = field(default_factory=list)
+    segmentation_events: list[dict[str, object]] = field(default_factory=list)
+    segment_merges: list[dict[str, object]] = field(default_factory=list)
+    sensitive_segments: list[dict[str, object]] = field(default_factory=list)
 
     def add(self, *, token: str, output: str, reason: str) -> None:
+        self.technical_tokens.append({"token": token, "output": output, "reason": reason})
         if token != output:
             self.transformations.append({"token": token, "output": output, "reason": reason})
+
+    def add_protected_zone(self, payload: dict[str, object]) -> None:
+        self.protected_zones.append(payload)
+
+    def add_segmentation_event(self, payload: dict[str, object]) -> None:
+        self.segmentation_events.append(payload)
+
+    def add_merge(self, payload: dict[str, object]) -> None:
+        self.segment_merges.append(payload)
+
+    def add_sensitive_segment(self, payload: dict[str, object]) -> None:
+        self.sensitive_segments.append(payload)
+
+
+@dataclass(frozen=True)
+class WordInfo:
+    text: str
+    cleaned: str
+    start: int
+    end: int
 
 
 def normalize_text(text: str) -> str:
@@ -183,6 +236,9 @@ def segment_text_for_tts(
     max_chars: int,
     sentence_pause_ms: int,
     strip_terminal_periods: bool,
+    language: str = "es",
+    settings: AppSettings | None = None,
+    debug: TextProcessingDebug | None = None,
 ) -> list[str | int]:
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
     if not paragraphs:
@@ -192,7 +248,14 @@ def segment_text_for_tts(
     for paragraph in paragraphs:
         sentences = _extract_sentences(paragraph)
         for index, sentence in enumerate(sentences):
-            chunks = _segment_sentence(sentence, max_chars=max_chars, strip_terminal_periods=strip_terminal_periods)
+            chunks = _segment_sentence(
+                sentence,
+                max_chars=max_chars,
+                strip_terminal_periods=strip_terminal_periods,
+                language=language,
+                settings=settings,
+                debug=debug,
+            )
             sequence.extend(chunk for chunk in chunks if chunk)
             if index < len(sentences) - 1 and sentence_pause_ms > 0:
                 sequence.append(sentence_pause_ms)
@@ -208,6 +271,8 @@ def segment_spans_for_tts(
     strip_terminal_periods: bool,
     reading_mode: str = "standard",
     min_segment_chars: int = 0,
+    settings: AppSettings | None = None,
+    debug: TextProcessingDebug | None = None,
 ) -> list[SpeechSpan | int]:
     if reading_mode == "technical_paragraph":
         return _segment_spans_for_technical_paragraph(
@@ -217,6 +282,8 @@ def segment_spans_for_tts(
             bilingual_transition_pause_ms=bilingual_transition_pause_ms,
             strip_terminal_periods=strip_terminal_periods,
             min_segment_chars=min_segment_chars,
+            settings=settings,
+            debug=debug,
         )
 
     sequence: list[SpeechSpan | int] = []
@@ -234,12 +301,15 @@ def segment_spans_for_tts(
             max_chars=max_chars,
             sentence_pause_ms=sentence_pause_ms,
             strip_terminal_periods=strip_terminal_periods,
+            language=span.language,
+            settings=settings,
+            debug=debug,
         )
         for item in items:
             if isinstance(item, int):
                 sequence.append(item)
             elif item:
-                sequence.append(SpeechSpan(text=item, language=span.language))
+                sequence.append(_build_segment_span(item, span.language, settings=settings, debug=debug))
         previous_language = span.language
     return sequence
 
@@ -252,6 +322,8 @@ def _segment_spans_for_technical_paragraph(
     bilingual_transition_pause_ms: int,
     strip_terminal_periods: bool,
     min_segment_chars: int,
+    settings: AppSettings | None,
+    debug: TextProcessingDebug | None,
 ) -> list[SpeechSpan | int]:
     sequence: list[SpeechSpan | int] = []
     pending_pause = 0
@@ -272,9 +344,13 @@ def _segment_spans_for_technical_paragraph(
             max_chars=max_chars,
             sentence_pause_ms=sentence_pause_ms,
             strip_terminal_periods=strip_terminal_periods,
+            language=span.language,
+            settings=settings,
+            debug=debug,
         )
         span_sequence: list[SpeechSpan | int] = [
-            SpeechSpan(text=item, language=span.language) if isinstance(item, str) else item for item in items
+            _build_segment_span(item, span.language, settings=settings, debug=debug) if isinstance(item, str) else item
+            for item in items
         ]
 
         if transition_pause:
@@ -284,7 +360,13 @@ def _segment_spans_for_technical_paragraph(
             if isinstance(item, int):
                 pending_pause = max(pending_pause, item)
                 continue
-            if _try_merge_short_segment(sequence, item, min_segment_chars=min_segment_chars, max_chars=max_chars):
+            if _try_merge_short_segment(
+                sequence,
+                item,
+                min_segment_chars=min_segment_chars,
+                max_chars=max_chars,
+                debug=debug,
+            ):
                 pending_pause = 0
                 continue
             if pending_pause > 0:
@@ -303,6 +385,7 @@ def _try_merge_short_segment(
     *,
     min_segment_chars: int,
     max_chars: int,
+    debug: TextProcessingDebug | None = None,
 ) -> bool:
     if min_segment_chars <= 0 or len(item.text) >= min_segment_chars or not sequence:
         return False
@@ -313,6 +396,17 @@ def _try_merge_short_segment(
     if len(candidate) > max_chars:
         return False
     previous.text = candidate
+    previous.sensitive = previous.sensitive or item.sensitive
+    previous.sensitivity_reasons = sorted({*previous.sensitivity_reasons, *item.sensitivity_reasons, "merged_short_technical_island"})
+    if debug:
+        debug.add_merge(
+            {
+                "reason": "short_same_language_segment",
+                "language": item.language,
+                "merged_text": candidate,
+                "incoming_text": item.text,
+            }
+        )
     return True
 
 
@@ -339,13 +433,98 @@ def _split_long_sentence(sentence: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _split_long_sentence_prosody_safe(
+    sentence: str,
+    *,
+    max_chars: int,
+    language: str,
+    settings: AppSettings,
+    debug: TextProcessingDebug | None,
+) -> list[str]:
+    words = _word_infos(sentence)
+    if not words:
+        return []
+
+    protected_indices, protected_reasons = _protected_word_indices(words, language=language, settings=settings)
+    if protected_indices and debug:
+        for index in sorted(protected_indices):
+            debug.add_protected_zone(
+                {
+                    "language": language,
+                    "word": words[index].text.strip(".,;:!?"),
+                    "word_index": index,
+                    "reasons": sorted(protected_reasons.get(index, [])),
+                }
+            )
+
+    chunks: list[str] = []
+    buffer: list[str] = []
+    overflow = max(0, settings.audio_tuning.protected_zone_max_overflow_chars)
+
+    for word_index, word in enumerate(words):
+        candidate_words = [*buffer, word.text]
+        candidate = " ".join(candidate_words).strip()
+        if buffer and len(candidate) > max_chars:
+            unsafe_break = _is_unsafe_break(
+                previous_index=word_index - 1,
+                next_index=word_index,
+                protected_indices=protected_indices,
+                settings=settings,
+            )
+            if unsafe_break and len(candidate) <= max_chars + overflow:
+                buffer.append(word.text)
+                if debug:
+                    debug.add_segmentation_event(
+                        {
+                            "event": "deferred_break",
+                            "reason": "protected_technical_context",
+                            "language": language,
+                            "candidate": candidate,
+                            "previous_word": words[word_index - 1].text,
+                            "next_word": word.text,
+                        }
+                    )
+                continue
+
+            chunk = " ".join(buffer).strip()
+            if chunk:
+                chunks.append(chunk)
+            buffer = [word.text]
+        else:
+            buffer.append(word.text)
+
+    if buffer:
+        chunks.append(" ".join(buffer).strip())
+    return _rebalance_sensitive_chunks(chunks, max_chars=max_chars, language=language, settings=settings, debug=debug)
+
+
 def _extract_sentences(paragraph: str) -> list[str]:
     matches = [match.group(0).strip() for match in SENTENCE_WITH_PUNCTUATION.finditer(paragraph) if match.group(0).strip()]
     return matches or [paragraph.strip()]
 
 
-def _segment_sentence(sentence: str, *, max_chars: int, strip_terminal_periods: bool) -> list[str]:
-    parts = _split_long_sentence(sentence, max_chars) if len(sentence) > max_chars else [sentence.strip()]
+def _segment_sentence(
+    sentence: str,
+    *,
+    max_chars: int,
+    strip_terminal_periods: bool,
+    language: str = "es",
+    settings: AppSettings | None = None,
+    debug: TextProcessingDebug | None = None,
+) -> list[str]:
+    if len(sentence) > max_chars:
+        if settings and settings.audio_tuning.sensitive_segment_detection:
+            parts = _split_long_sentence_prosody_safe(
+                sentence,
+                max_chars=max_chars,
+                language=language,
+                settings=settings,
+                debug=debug,
+            )
+        else:
+            parts = _split_long_sentence(sentence, max_chars)
+    else:
+        parts = [sentence.strip()]
     if not parts:
         return []
 
@@ -356,6 +535,152 @@ def _segment_sentence(sentence: str, *, max_chars: int, strip_terminal_periods: 
             cleaned = re.sub(r"[.;:]+\s*$", "", cleaned).strip()
         cleaned_parts.append(cleaned)
     return [part for part in cleaned_parts if part]
+
+
+def _word_infos(text: str) -> list[WordInfo]:
+    return [
+        WordInfo(
+            text=match.group(0),
+            cleaned=_clean_word(match.group(0)),
+            start=match.start(),
+            end=match.end(),
+        )
+        for match in WORD_WITH_SPAN.finditer(text)
+    ]
+
+
+def _clean_word(word: str) -> str:
+    return word.strip(" \t\r\n.,;:!?()[]{}\"'").casefold()
+
+
+def _protected_word_indices(
+    words: list[WordInfo],
+    *,
+    language: str,
+    settings: AppSettings,
+) -> tuple[set[int], dict[int, set[str]]]:
+    protected: set[int] = set()
+    reasons: dict[int, set[str]] = {}
+    before = max(0, settings.audio_tuning.protected_token_context_words_before)
+    after = max(0, settings.audio_tuning.protected_token_context_words_after)
+
+    def mark(index: int, reason: str) -> None:
+        start = max(0, index - before)
+        end = min(len(words) - 1, index + after)
+        for zone_index in range(start, end + 1):
+            protected.add(zone_index)
+            reasons.setdefault(zone_index, set()).add(reason if zone_index == index else f"context_for_{reason}")
+
+    for index, word in enumerate(words):
+        token_reasons = _protected_token_reasons(word.text, word.cleaned, language=language)
+        for reason in token_reasons:
+            mark(index, reason)
+
+    return protected, reasons
+
+
+def _protected_token_reasons(raw_word: str, cleaned: str, *, language: str) -> list[str]:
+    token = raw_word.strip(".,;:!?()[]{}\"'")
+    if not token:
+        return []
+
+    reasons: list[str] = []
+    if language == "en":
+        reasons.append("english_span")
+    if cleaned in TECHNICAL_ANCHOR_WORDS:
+        reasons.append("technical_anchor")
+    if ACRONYM_TOKEN.fullmatch(token):
+        reasons.append("acronym")
+    if any(char in token for char in "./_"):
+        reasons.append("technical_notation")
+    if "/" in token:
+        reasons.append("slash_notation")
+    if _looks_technical_token(token):
+        reasons.append("complex_technical_token")
+    is_simple_capitalized_word = token[:1].isupper() and token[1:].islower()
+    if not is_simple_capitalized_word and any(char.islower() for char in token) and any(char.isupper() for char in token):
+        reasons.append("camel_or_pascal_case")
+    return sorted(set(reasons))
+
+
+def _is_unsafe_break(
+    *,
+    previous_index: int,
+    next_index: int,
+    protected_indices: set[int],
+    settings: AppSettings,
+) -> bool:
+    after_is_unsafe = settings.audio_tuning.avoid_segment_break_after_technical_token and previous_index in protected_indices
+    before_is_unsafe = settings.audio_tuning.avoid_segment_break_before_technical_token and next_index in protected_indices
+    return after_is_unsafe or before_is_unsafe
+
+
+def _rebalance_sensitive_chunks(
+    chunks: list[str],
+    *,
+    max_chars: int,
+    language: str,
+    settings: AppSettings,
+    debug: TextProcessingDebug | None,
+) -> list[str]:
+    if len(chunks) < 2:
+        return chunks
+
+    rebalanced: list[str] = []
+    for chunk in chunks:
+        if not rebalanced:
+            rebalanced.append(chunk)
+            continue
+        sensitive, reasons = _detect_sensitive_segment(chunk, language=language, settings=settings)
+        previous = rebalanced[-1]
+        candidate = _cleanup_spacing(f"{previous} {chunk}")
+        max_anchored_length = max_chars + max(0, settings.audio_tuning.protected_zone_max_overflow_chars)
+        if sensitive and len(chunk) < settings.audio_tuning.min_segment_chars and len(candidate) <= max_anchored_length:
+            rebalanced[-1] = candidate
+            if debug:
+                debug.add_merge(
+                    {
+                        "reason": "technical_island_anchor",
+                        "language": language,
+                        "incoming_text": chunk,
+                        "merged_text": candidate,
+                        "sensitivity_reasons": reasons,
+                    }
+                )
+            continue
+        rebalanced.append(chunk)
+    return rebalanced
+
+
+def _build_segment_span(
+    text: str,
+    language: str,
+    *,
+    settings: AppSettings | None,
+    debug: TextProcessingDebug | None,
+) -> SpeechSpan:
+    sensitive, reasons = _detect_sensitive_segment(text, language=language, settings=settings)
+    span = SpeechSpan(text=text, language=language, sensitive=sensitive, sensitivity_reasons=reasons)
+    if sensitive and debug:
+        debug.add_sensitive_segment({"language": language, "text": text, "reasons": reasons})
+    return span
+
+
+def _detect_sensitive_segment(
+    text: str,
+    *,
+    language: str,
+    settings: AppSettings | None,
+) -> tuple[bool, list[str]]:
+    if settings and not settings.audio_tuning.sensitive_segment_detection:
+        return False, []
+    reasons: set[str] = set()
+    words = _word_infos(text)
+    for word in words:
+        reasons.update(_protected_token_reasons(word.text, word.cleaned, language=language))
+    if language == "en" and len(words) <= 8:
+        reasons.add("short_english_span")
+    return bool(reasons), sorted(reasons)
 
 
 def _extract_inline_pronunciations(text: str, placeholders: dict[str, str]) -> str:

@@ -71,9 +71,19 @@
     "crossfade_ms": 18,
     "same_language_crossfade_ms": 12,
     "bilingual_crossfade_ms": 0,
+    "same_language_crossfade_for_sensitive_segments_ms": 0,
+    "disable_fades_for_sensitive_segments": true,
+    "min_chars_for_crossfade": 95,
+    "segment_join_strategy": "conservative",
     "bilingual_transition_pause_ms": 120,
     "technical_bilingual_transition_pause_ms": 70,
     "min_segment_chars": 70,
+    "protected_token_context_words_before": 2,
+    "protected_token_context_words_after": 3,
+    "avoid_segment_break_after_technical_token": true,
+    "avoid_segment_break_before_technical_token": true,
+    "protected_zone_max_overflow_chars": 80,
+    "sensitive_segment_detection": true,
     "strip_terminal_periods": true
   }
 }

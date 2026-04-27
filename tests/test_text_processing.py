@@ -2,7 +2,13 @@ import unittest
 
 from app.config.settings import AppSettings, _default_variants
 from app.utils.text_parser import parse_input_document
-from app.utils.text_processing import adapt_text_for_speech, adapt_text_to_speech_spans, normalize_text, segment_spans_for_tts
+from app.utils.text_processing import (
+    TextProcessingDebug,
+    adapt_text_for_speech,
+    adapt_text_to_speech_spans,
+    normalize_text,
+    segment_spans_for_tts,
+)
 
 
 def build_settings() -> AppSettings:
@@ -165,6 +171,63 @@ class TextProcessingTestCase(unittest.TestCase):
             min_segment_chars=70,
         )
         self.assertEqual([item for item in sequence if isinstance(item, int)], [70, 70])
+
+    def test_prosody_safe_segmenter_defers_break_after_technical_token(self) -> None:
+        debug = TextProcessingDebug()
+        sequence = segment_spans_for_tts(
+            [
+                self._span(
+                    "El servicio procesa eventos antes de sessionToken y despues mantiene la sesion activa para cerrar la transaccion.",
+                    "es",
+                )
+            ],
+            max_chars=58,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=True,
+            reading_mode="technical_paragraph",
+            min_segment_chars=40,
+            settings=self.settings,
+            debug=debug,
+        )
+        speech_items = [item for item in sequence if not isinstance(item, int)]
+        self.assertTrue(any("sessiontoken y despues" in item.text.casefold() for item in speech_items))
+        self.assertTrue(any(event["event"] == "deferred_break" for event in debug.segmentation_events))
+
+    def test_short_english_span_is_sensitive_but_not_oversegmented(self) -> None:
+        sequence = segment_spans_for_tts(
+            [
+                self._span("La recomendacion es", "es"),
+                self._span("retry with exponential backoff", "en"),
+                self._span("antes de reintentar la llamada.", "es"),
+            ],
+            max_chars=60,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=True,
+            reading_mode="technical_paragraph",
+            min_segment_chars=40,
+            settings=self.settings,
+        )
+        english_items = [item for item in sequence if not isinstance(item, int) and item.language == "en"]
+        self.assertEqual(len(english_items), 1)
+        self.assertTrue(english_items[0].sensitive)
+        self.assertIn("short_english_span", english_items[0].sensitivity_reasons)
+
+    def test_camel_case_boundary_is_marked_sensitive(self) -> None:
+        sequence = segment_spans_for_tts(
+            [self._span("El cliente renueva sessionToken antes de llamar la API interna.", "es")],
+            max_chars=90,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=True,
+            reading_mode="technical_paragraph",
+            min_segment_chars=40,
+            settings=self.settings,
+        )
+        speech_items = [item for item in sequence if not isinstance(item, int)]
+        self.assertTrue(speech_items[0].sensitive)
+        self.assertIn("technical_anchor", speech_items[0].sensitivity_reasons)
 
     def test_parser_supports_optional_english_voice_tag(self) -> None:
         document = parse_input_document(
