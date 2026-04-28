@@ -59,6 +59,7 @@ async def generate(request: Request, background_tasks: BackgroundTasks) -> JSONR
     normalize_audio = str(form.get("normalize_audio") or "true").lower() == "true"
     export_mp3 = str(form.get("export_mp3") or "false").lower() == "true"
     export_m4a = str(form.get("export_m4a") or "false").lower() == "true"
+    long_render = _resolve_optional_bool(form.get("long_render"))
     playlist_ids = _resolve_playlist_selection(form, request.app.state.history_service)
 
     voice_upload = form.get("voice_upload")
@@ -88,6 +89,7 @@ async def generate(request: Request, background_tasks: BackgroundTasks) -> JSONR
         normalize_audio=normalize_audio,
         export_mp3=export_mp3,
         export_m4a=export_m4a,
+        long_render=long_render,
         playlist_ids=playlist_ids,
     )
 
@@ -377,6 +379,7 @@ async def health(request: Request) -> JSONResponse:
         "ffmpeg_available": has_ffmpeg(),
         "default_variant": settings.default_variant,
         "eco_mode": settings.eco_mode.model_dump(mode="json"),
+        "long_render": settings.long_render.model_dump(mode="json"),
         "voices_available": _list_voices(settings),
     }
     return JSONResponse(payload)
@@ -448,6 +451,17 @@ def _resolve_playlist_selection(form, history_service) -> list[str]:
         playlist = history_service.create_playlist(quick_name)
         playlist_ids.append(playlist.id)
     return history_service.normalize_playlist_ids(playlist_ids)
+
+
+def _resolve_optional_bool(value: object) -> bool | None:
+    if value is None or str(value).strip() == "":
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "force"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "standard"}:
+        return False
+    return None
 
 
 def _serialize_history_items(items: list[HistoryItem], playlist_map: dict[str, Playlist]) -> list[dict]:

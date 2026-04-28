@@ -94,6 +94,27 @@ class EcoModeConfig(BaseModel):
     inter_segment_cooldown_ms: int = 250
 
 
+class LongRenderConfig(BaseModel):
+    enabled: bool = Field(True, description="Enable disk-backed rendering for long jobs.")
+    force: bool = Field(False, description="Always use long_render when enabled.")
+    auto_enable_min_estimated_seconds: int = Field(1200, description="Estimated seconds that trigger long_render.")
+    auto_enable_min_segments: int = Field(80, description="Speech segments that trigger long_render.")
+    keep_temp_segments: bool = Field(True, description="Keep segment WAVs and processed chunks after success.")
+    enable_resume: bool = Field(True, description="Reuse already validated segment WAVs for the same job directory.")
+    checkpoint_every_segments: int = Field(1, description="Persist the render manifest every N rendered segments.")
+    max_segment_retries: int = Field(2, description="Retries for invalid or suspicious TTS chunks.")
+    validate_segments: bool = Field(True, description="Validate generated segment WAV files before assembly.")
+    assemble_with_ffmpeg_concat: bool = Field(True, description="Assemble long renders with FFmpeg concat from disk.")
+    normalize_per_segment: bool = Field(False, description="Normalize each processed chunk before concat.")
+    normalize_final_with_ffmpeg: bool = Field(False, description="Run FFmpeg loudnorm on the final long WAV.")
+    cleanup_after_success: bool = Field(False, description="Remove long render work directory after a successful job.")
+    cleanup_after_failure: bool = Field(False, description="Remove long render work directory after a failed job.")
+    min_segment_duration_ms: int = Field(300, description="Minimum plausible duration for a rendered speech segment.")
+    silence_threshold_db: int = Field(-52, description="dBFS threshold for detecting nearly silent failed chunks.")
+    concat_sample_rate: int = Field(24000, description="Sample rate used for disk concat chunks.")
+    concat_channels: int = Field(1, description="Channel count used for disk concat chunks.")
+
+
 class AudioTuningConfig(BaseModel):
     reading_mode: Literal["standard", "technical_paragraph"] = Field(
         "technical_paragraph",
@@ -183,6 +204,7 @@ class AppSettings(BaseModel):
     tts: TTSConfig = Field(default_factory=TTSConfig)
     speech: SpeechConfig = Field(default_factory=SpeechConfig)
     eco_mode: EcoModeConfig = Field(default_factory=EcoModeConfig)
+    long_render: LongRenderConfig = Field(default_factory=LongRenderConfig)
     audio_tuning: AudioTuningConfig = Field(default_factory=AudioTuningConfig)
 
     @property
@@ -275,6 +297,7 @@ def get_settings() -> AppSettings:
     else:
         raw["speech"] = speech_defaults
     raw.setdefault("eco_mode", EcoModeConfig().model_dump(mode="json"))
+    raw.setdefault("long_render", LongRenderConfig().model_dump(mode="json"))
     raw.setdefault("audio_tuning", AudioTuningConfig().model_dump(mode="json"))
     settings = AppSettings.model_validate(raw)
 

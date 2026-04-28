@@ -22,6 +22,9 @@ Importante: para una instalacion estable de Coqui XTTS v2 en macOS, usa Python 3
 - `app/services/xtts_service.py`: integracion con Coqui XTTS v2
 - `app/services/generation_service.py`: orquestacion de parsing, segmentacion, sintesis y persistencia
 - `app/services/audio_pipeline.py`: concatenacion, silencios, normalizacion y exportaciones
+- `app/services/disk_audio_assembler.py`: ensamblado en disco para renders largos con FFmpeg concat
+- `app/services/audio_segment_validator.py`: validacion de WAV generados por segmento
+- `app/services/render_manifest.py`: manifiesto/checkpoints persistentes de renders largos
 - `app/services/history_service.py`: historial JSON en `output/history.json`
 - `app/services/job_manager.py`: estado en memoria y eventos SSE por job
 - `app/config/default_lexicons.py`: lexico base de pronunciacion y tildes frecuentes
@@ -37,9 +40,10 @@ Importante: para una instalacion estable de Coqui XTTS v2 en macOS, usa Python 3
 2. El backend parsea etiquetas opcionales como `[TITULO]`, `[IDIOMA]`, `[VOZ]`, `[TEXTO]`, `[PAUSA]`.
 3. El texto se limpia y se divide en segmentos seguros por parrafo y puntuacion.
 4. XTTS sintetiza cada segmento con una voz de referencia WAV.
-5. El pipeline inserta silencios, concatena, normaliza si aplica y exporta WAV.
-6. Si FFmpeg existe, exporta MP3 y M4A opcionales.
-7. El resultado se persiste en historial y se expone en la UI.
+5. Para renders cortos, `audio_pipeline.py` inserta silencios, concatena, normaliza si aplica y exporta WAV.
+6. Para renders largos, `long_render` guarda segmentos persistentes, valida/reintenta chunks, escribe manifiesto y ensambla desde disco con FFmpeg concat.
+7. Si FFmpeg existe, exporta MP3 y M4A opcionales.
+8. El resultado se persiste en historial y se expone en la UI.
 
 ### Consideraciones de dialecto
 
@@ -169,9 +173,51 @@ python -c "from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/x
 
 - `settings.json` usa `device_preference: "auto"` y elegira `mps` si PyTorch lo soporta.
 - Si observas inestabilidad o errores en `mps`, cambia a `cpu`.
-- Para renders largos de 20 a 25 minutos, conviene usar segmentos de `220` a `300` caracteres para reducir fallos por memoria.
+- Para renders largos de 20 a 25 minutos, conviene usar segmentos de `180` a `260` caracteres para reducir degradacion local de XTTS.
 - El proyecto incluye `eco_mode` activo por defecto para limitar hilos de PyTorch y enfriar `250 ms` entre segmentos.
 - Puedes ajustar `eco_mode.max_torch_threads`, `eco_mode.max_interop_threads` y `eco_mode.inter_segment_cooldown_ms` en `settings.json`.
+
+### Renders largos en disco
+
+La seccion `long_render` de `settings.json` activa un pipeline robusto para guiones extensos. Se usa automaticamente cuando:
+
+- la duracion estimada supera `long_render.auto_enable_min_estimated_seconds` (por defecto `1200`, 20 minutos)
+- o el plan supera `long_render.auto_enable_min_segments` (por defecto `80` segmentos de voz)
+- o `long_render.force` esta en `true`
+- o una llamada a `/generate` envia `long_render=true`
+
+En este modo:
+
+- cada segmento XTTS se escribe como WAV persistente en `output/renders/<job_id>/segments/`
+- cada segmento se valida antes de ensamblar
+- los segmentos sospechosos se reintentan hasta `long_render.max_segment_retries`
+- el manifiesto queda en `output/renders/<job_id>/manifest.json`
+- los chunks procesados para concat quedan en `output/renders/<job_id>/processed/`
+- el debug completo queda en `output/debug/<job_id>.json`
+- el WAV final se ensambla con FFmpeg concat sin construir un `AudioSegment` gigante en RAM
+
+Configuracion recomendada para audios de mas de 25 minutos:
+
+```json
+"long_render": {
+  "enabled": true,
+  "force": false,
+  "auto_enable_min_estimated_seconds": 1200,
+  "auto_enable_min_segments": 80,
+  "keep_temp_segments": true,
+  "enable_resume": true,
+  "checkpoint_every_segments": 1,
+  "max_segment_retries": 2,
+  "validate_segments": true,
+  "assemble_with_ffmpeg_concat": true,
+  "normalize_per_segment": false,
+  "normalize_final_with_ffmpeg": false,
+  "cleanup_after_success": false,
+  "cleanup_after_failure": false
+}
+```
+
+Para normalizar un render largo sin cargar todo en memoria, activa `normalize_final_with_ffmpeg`. Si FFmpeg no esta instalado y `assemble_with_ffmpeg_concat` esta activo, el render largo falla de forma explicita porque no puede garantizar ensamblado en disco.
 
 ### Si fallaste con Python 3.13 o 3.14
 

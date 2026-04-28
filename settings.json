@@ -66,6 +66,26 @@
     "max_interop_threads": 1,
     "inter_segment_cooldown_ms": 250
   },
+  "long_render": {
+    "enabled": true,
+    "force": false,
+    "auto_enable_min_estimated_seconds": 1200,
+    "auto_enable_min_segments": 80,
+    "keep_temp_segments": true,
+    "enable_resume": true,
+    "checkpoint_every_segments": 1,
+    "max_segment_retries": 2,
+    "validate_segments": true,
+    "assemble_with_ffmpeg_concat": true,
+    "normalize_per_segment": false,
+    "normalize_final_with_ffmpeg": false,
+    "cleanup_after_success": false,
+    "cleanup_after_failure": false,
+    "min_segment_duration_ms": 300,
+    "silence_threshold_db": -52,
+    "concat_sample_rate": 24000,
+    "concat_channels": 1
+  },
   "audio_tuning": {
     "reading_mode": "technical_paragraph",
     "sentence_pause_ms": 220,

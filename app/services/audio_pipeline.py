@@ -66,11 +66,7 @@ class AudioPipeline:
                 rendered = item if isinstance(item, RenderedAudioSegment) else RenderedAudioSegment(path=item, language="unknown")
                 path = rendered.path
                 language = rendered.language
-                with path.open("rb") as audio_file:
-                    segment = AudioSegment.from_file(audio_file)
-                raw_duration_ms = len(segment)
-                segment, cleanup_trace = self._sanitize_segment(segment, rendered)
-                segment = self._smooth_segment(segment, rendered=rendered)
+                segment, segment_trace = self.prepare_segment_for_assembly(rendered)
                 join_strategy = self._join_strategy(previous_item, rendered)
                 if previous_item is not None and len(combined) > 0:
                     crossfade_ms = self._effective_crossfade_ms(combined, segment, previous_item, rendered)
@@ -94,9 +90,9 @@ class AudioPipeline:
                         "sensitive": rendered.sensitive,
                         "sensitivity_reasons": list(rendered.sensitivity_reasons),
                         "terminal": rendered.terminal,
-                        "raw_duration_ms": raw_duration_ms,
+                        "raw_duration_ms": segment_trace["raw_duration_ms"],
                         "duration_ms": len(segment),
-                        "cleanup": cleanup_trace,
+                        "cleanup": segment_trace["cleanup"],
                         "start_ms": start_ms,
                         "end_ms": len(combined),
                         "join_strategy": join_strategy,
@@ -152,6 +148,18 @@ class AudioPipeline:
                 encoding="utf-8",
             )
         return OutputFiles(wav=wav_name, mp3=mp3_name, m4a=m4a_name), duration_seconds, warnings
+
+    def prepare_segment_for_assembly(self, rendered: RenderedAudioSegment) -> tuple[AudioSegment, dict[str, object]]:
+        with rendered.path.open("rb") as audio_file:
+            segment = AudioSegment.from_file(audio_file)
+        raw_duration_ms = len(segment)
+        segment, cleanup_trace = self._sanitize_segment(segment, rendered)
+        segment = self._smooth_segment(segment, rendered=rendered)
+        return segment, {
+            "raw_duration_ms": raw_duration_ms,
+            "duration_ms": len(segment),
+            "cleanup": cleanup_trace,
+        }
 
     def _sanitize_segment(
         self,

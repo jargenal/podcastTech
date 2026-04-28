@@ -54,6 +54,7 @@ class GenerationOptions(BaseModel):
     normalize_audio: bool = True
     export_mp3: bool = False
     export_m4a: bool = False
+    long_render: bool | None = None
     playlist_ids: list[str] = Field(default_factory=list)
 
 
