@@ -1,0 +1,11 @@
+[TITULO]
+Benchmark técnico bilingüe de regresión
+
+[TEXTO]
+GitHub expone una REST API detrás de API Gateway, y el flujo registra eventos en CloudWatch para revisar latencia, errores y comportamiento de usuarios.
+
+La integración usa accessKeyId, episodeId, userName, refreshToken y profileImageURL como identificadores técnicos que deben leerse por componentes sin pausas exageradas ni pérdida de claridad.
+
+El pipeline debe articular correctamente S3, EC2, IAM y Route 53, sin omitir números ni convertir los acrónimos en palabras raras.
+
+Finalmente, este benchmark también debe revelar si el pipeline puede manejar una explicación técnica real sobre text preprocessing, speech synthesis, prompt engineering, embeddings, fine-tuning y tokenizer behavior, manteniendo una lectura natural de principio a fin, con pausas razonables, sin microcortes innecesarios y sin esa sensación de voz robotizada que suele aparecer después de ciertos términos especializados.

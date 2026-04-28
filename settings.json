@@ -69,11 +69,17 @@
   "audio_tuning": {
     "reading_mode": "technical_paragraph",
     "sentence_pause_ms": 220,
+    "paragraph_pause_ms": 380,
+    "technical_density_threshold": 4,
+    "technical_density_max_chars": 165,
+    "max_technical_tokens_per_segment": 4,
+    "prosody_group_min_chars": 80,
     "segment_fade_ms": 28,
     "segment_fade_in_ms": 6,
     "segment_fade_out_ms": 0,
     "terminal_segment_fade_out_ms": 0,
-    "terminal_segment_tail_silence_ms": 60,
+    "terminal_segment_tail_silence_ms": 160,
+    "terminal_long_token_extra_tail_silence_ms": 60,
     "short_segment_fade_ms": 8,
     "crossfade_ms": 18,
     "same_language_crossfade_ms": 12,
@@ -92,6 +98,11 @@
     "protected_zone_max_overflow_chars": 80,
     "sensitive_segment_detection": true,
     "preserve_terminal_punctuation": true,
-    "strip_terminal_periods": false
+    "strip_terminal_periods": false,
+    "enable_safe_audio_cleanup": true,
+    "silence_trim_threshold_db": -48,
+    "max_leading_silence_trim_ms": 250,
+    "max_trailing_silence_trim_ms": 1200,
+    "preserved_trailing_silence_ms": 220
   }
 }

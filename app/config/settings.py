@@ -100,11 +100,20 @@ class AudioTuningConfig(BaseModel):
         description="technical_paragraph favors longer fluent chunks and fewer pauses for bilingual technical prose.",
     )
     sentence_pause_ms: int = 220
+    paragraph_pause_ms: int = Field(380, description="Clean silence inserted between text paragraphs.")
+    technical_density_threshold: int = Field(4, description="Technical tokens that trigger shorter, safer chunks.")
+    technical_density_max_chars: int = Field(165, description="Max chunk size for high-density technical sentences.")
+    max_technical_tokens_per_segment: int = Field(4, description="Soft limit for fragile technical tokens per chunk.")
+    prosody_group_min_chars: int = Field(80, description="Minimum size before splitting at comma/connector groups.")
     segment_fade_ms: int = 28
     segment_fade_in_ms: int = Field(6, description="Fade-in for rendered TTS chunks.")
     segment_fade_out_ms: int = Field(0, description="Fade-out for rendered TTS chunks; 0 preserves final syllables.")
     terminal_segment_fade_out_ms: int = Field(0, description="Fade-out at final/pause boundaries.")
-    terminal_segment_tail_silence_ms: int = Field(60, description="Small closure pad after terminal segments.")
+    terminal_segment_tail_silence_ms: int = Field(160, description="Small closure pad after terminal segments.")
+    terminal_long_token_extra_tail_silence_ms: int = Field(
+        60,
+        description="Extra clean tail when the terminal word is long or technically fragile.",
+    )
     short_segment_fade_ms: int = Field(8, description="Max fade for very short segments to avoid losing consonants.")
     crossfade_ms: int = 18
     same_language_crossfade_ms: int | None = Field(12, description="Crossfade used only between same-language audio.")
@@ -142,6 +151,11 @@ class AudioTuningConfig(BaseModel):
     sensitive_segment_detection: bool = True
     preserve_terminal_punctuation: bool = Field(True, description="Keep final punctuation to help TTS phrase closure.")
     strip_terminal_periods: bool = False
+    enable_safe_audio_cleanup: bool = Field(True, description="Conservatively trims only detected silence, not speech.")
+    silence_trim_threshold_db: int = Field(-48, description="dBFS threshold used for safe silence detection.")
+    max_leading_silence_trim_ms: int = Field(250, description="Max leading silence removed from a TTS chunk.")
+    max_trailing_silence_trim_ms: int = Field(1200, description="Max trailing silence excess removed from a TTS chunk.")
+    preserved_trailing_silence_ms: int = Field(220, description="Silence kept before adding clean terminal tails.")
 
 
 class AppSettings(BaseModel):

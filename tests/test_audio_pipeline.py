@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from pydub import AudioSegment
+from pydub.generators import Sine
 
 from app.config.settings import AppSettings, _default_variants
 from app.services.audio_pipeline import AudioPipeline, RenderedAudioSegment
@@ -60,7 +61,7 @@ class AudioPipelineTraceTestCase(unittest.TestCase):
             pipeline = AudioPipeline(settings)
 
             segment_path = root / "terminal.wav"
-            with AudioSegment.silent(duration=1000).export(segment_path, format="wav"):
+            with Sine(440).to_audio_segment(duration=1000).export(segment_path, format="wav"):
                 pass
 
             debug_path = root / "debug" / "terminal.json"
@@ -85,8 +86,45 @@ class AudioPipelineTraceTestCase(unittest.TestCase):
             payload = json.loads(debug_path.read_text(encoding="utf-8"))
             speech_item = [item for item in payload["items"] if item["kind"] == "speech"][0]
             self.assertTrue(speech_item["terminal"])
-            self.assertIn("tail_60ms", speech_item["fade_policy"])
-            self.assertEqual(speech_item["duration_ms"], 1060)
+            self.assertIn("tail_220ms", speech_item["fade_policy"])
+            self.assertEqual(speech_item["duration_ms"], 1220)
+            self.assertTrue(speech_item["cleanup"]["terminal_word_protected"])
+
+    def test_safe_cleanup_trims_only_excess_silence_before_clean_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = AppSettings(variants=_default_variants(), output_dir=str(root))
+            pipeline = AudioPipeline(settings)
+
+            segment_path = root / "cleanup.wav"
+            audio = AudioSegment.silent(duration=400) + AudioSegment.silent(duration=1000) + AudioSegment.silent(duration=700)
+            with audio.export(segment_path, format="wav"):
+                pass
+
+            debug_path = root / "debug" / "cleanup.json"
+            pipeline.assemble(
+                sequence=[
+                    RenderedAudioSegment(
+                        path=segment_path,
+                        language="es",
+                        order=1,
+                        text="Cierre después.",
+                        terminal=True,
+                    ),
+                ],
+                title="cleanup trace",
+                normalize_audio=False,
+                export_mp3=False,
+                export_m4a=False,
+                debug_path=debug_path,
+                job_id="cleanup",
+            )
+
+            payload = json.loads(debug_path.read_text(encoding="utf-8"))
+            speech_item = [item for item in payload["items"] if item["kind"] == "speech"][0]
+            self.assertEqual(speech_item["cleanup"]["trim_policy"], "safe_silence_only")
+            self.assertLessEqual(speech_item["cleanup"]["trimmed_leading_ms"], settings.audio_tuning.max_leading_silence_trim_ms)
+            self.assertGreaterEqual(speech_item["cleanup"]["trimmed_trailing_ms"], 1)
 
 
 if __name__ == "__main__":

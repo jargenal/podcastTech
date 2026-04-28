@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pydub import AudioSegment, effects
+from pydub.silence import detect_leading_silence
 
 from app.config.settings import AppSettings
 from app.models.domain import OutputFiles
@@ -68,7 +69,8 @@ class AudioPipeline:
                 with path.open("rb") as audio_file:
                     segment = AudioSegment.from_file(audio_file)
                 raw_duration_ms = len(segment)
-                segment = self._smooth_segment(segment, sensitive=rendered.sensitive, terminal=rendered.terminal)
+                segment, cleanup_trace = self._sanitize_segment(segment, rendered)
+                segment = self._smooth_segment(segment, rendered=rendered)
                 join_strategy = self._join_strategy(previous_item, rendered)
                 if previous_item is not None and len(combined) > 0:
                     crossfade_ms = self._effective_crossfade_ms(combined, segment, previous_item, rendered)
@@ -94,11 +96,13 @@ class AudioPipeline:
                         "terminal": rendered.terminal,
                         "raw_duration_ms": raw_duration_ms,
                         "duration_ms": len(segment),
+                        "cleanup": cleanup_trace,
                         "start_ms": start_ms,
                         "end_ms": len(combined),
                         "join_strategy": join_strategy,
                         "crossfade_ms": crossfade_ms,
-                        "fade_policy": self._fade_policy(rendered.sensitive, rendered.terminal, len(segment)),
+                        "fade_policy": self._fade_policy(rendered, len(segment)),
+                        "temp_path": str(path),
                     }
                 )
                 previous_item = rendered
@@ -149,13 +153,48 @@ class AudioPipeline:
             )
         return OutputFiles(wav=wav_name, mp3=mp3_name, m4a=m4a_name), duration_seconds, warnings
 
-    def _smooth_segment(self, segment: AudioSegment, *, sensitive: bool, terminal: bool) -> AudioSegment:
-        if sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
-            return self._with_terminal_tail(segment, terminal=terminal)
+    def _sanitize_segment(
+        self,
+        segment: AudioSegment,
+        rendered: RenderedAudioSegment,
+    ) -> tuple[AudioSegment, dict[str, object]]:
+        trace: dict[str, object] = {
+            "enabled": self._settings.audio_tuning.enable_safe_audio_cleanup,
+            "trimmed_leading_ms": 0,
+            "trimmed_trailing_ms": 0,
+            "trim_policy": "none",
+        }
+        if not self._settings.audio_tuning.enable_safe_audio_cleanup or len(segment) == 0:
+            return segment, trace
+
+        threshold = self._settings.audio_tuning.silence_trim_threshold_db
+        leading_silence = detect_leading_silence(segment, silence_threshold=threshold, chunk_size=10)
+        leading_trim = min(leading_silence, self._settings.audio_tuning.max_leading_silence_trim_ms)
+        if leading_trim > 0:
+            segment = segment[leading_trim:]
+            trace["trimmed_leading_ms"] = leading_trim
+
+        trailing_silence = detect_leading_silence(segment.reverse(), silence_threshold=threshold, chunk_size=10)
+        preserved = self._settings.audio_tuning.preserved_trailing_silence_ms
+        trailing_trim = max(0, trailing_silence - preserved)
+        trailing_trim = min(trailing_trim, self._settings.audio_tuning.max_trailing_silence_trim_ms)
+        if trailing_trim > 0:
+            segment = segment[:-trailing_trim]
+            trace["trimmed_trailing_ms"] = trailing_trim
+
+        if leading_trim or trailing_trim:
+            trace["trim_policy"] = "safe_silence_only"
+        trace["terminal_word"] = _last_word(rendered.text)
+        trace["terminal_word_protected"] = _needs_extra_terminal_tail(rendered)
+        return segment, trace
+
+    def _smooth_segment(self, segment: AudioSegment, *, rendered: RenderedAudioSegment) -> AudioSegment:
+        if rendered.sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
+            return self._with_terminal_tail(segment, rendered=rendered)
         fade_in_ms = self._settings.audio_tuning.segment_fade_in_ms
         fade_out_ms = (
             self._settings.audio_tuning.terminal_segment_fade_out_ms
-            if terminal
+            if rendered.terminal
             else self._settings.audio_tuning.segment_fade_out_ms
         )
         if self._settings.audio_tuning.segment_fade_ms > 0:
@@ -165,12 +204,12 @@ class AudioPipeline:
             fade_in_ms = min(fade_in_ms, self._settings.audio_tuning.short_segment_fade_ms)
             fade_out_ms = min(fade_out_ms, self._settings.audio_tuning.short_segment_fade_ms)
         if len(segment) < max(fade_in_ms + fade_out_ms, 1) * 3:
-            return self._with_terminal_tail(segment, terminal=terminal)
+            return self._with_terminal_tail(segment, rendered=rendered)
         if fade_in_ms > 0:
             segment = segment.fade_in(fade_in_ms)
         if fade_out_ms > 0:
             segment = segment.fade_out(fade_out_ms)
-        return self._with_terminal_tail(segment, terminal=terminal)
+        return self._with_terminal_tail(segment, rendered=rendered)
 
     def _effective_crossfade_ms(
         self,
@@ -206,15 +245,15 @@ class AudioPipeline:
             return "sensitive_conservative"
         return self._settings.audio_tuning.segment_join_strategy
 
-    def _fade_policy(self, sensitive: bool, terminal: bool, duration_ms: int) -> str:
-        tail = self._settings.audio_tuning.terminal_segment_tail_silence_ms if terminal else 0
-        if sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
+    def _fade_policy(self, rendered: RenderedAudioSegment, duration_ms: int) -> str:
+        tail = self._terminal_tail_ms(rendered)
+        if rendered.sensitive and self._settings.audio_tuning.disable_fades_for_sensitive_segments:
             return f"disabled_sensitive_segment_tail_{tail}ms" if tail else "disabled_sensitive_segment"
         if duration_ms < 900:
             return f"short_segment_{self._settings.audio_tuning.short_segment_fade_ms}ms_tail_{tail}ms"
         fade_out = (
             self._settings.audio_tuning.terminal_segment_fade_out_ms
-            if terminal
+            if rendered.terminal
             else self._settings.audio_tuning.segment_fade_out_ms
         )
         return (
@@ -222,8 +261,26 @@ class AudioPipeline:
             f"out_{fade_out}ms_tail_{tail}ms"
         )
 
-    def _with_terminal_tail(self, segment: AudioSegment, *, terminal: bool) -> AudioSegment:
-        tail_ms = self._settings.audio_tuning.terminal_segment_tail_silence_ms if terminal else 0
+    def _with_terminal_tail(self, segment: AudioSegment, *, rendered: RenderedAudioSegment) -> AudioSegment:
+        tail_ms = self._terminal_tail_ms(rendered)
         if tail_ms <= 0:
             return segment
         return segment + AudioSegment.silent(duration=tail_ms)
+
+    def _terminal_tail_ms(self, rendered: RenderedAudioSegment) -> int:
+        if not rendered.terminal:
+            return 0
+        tail_ms = self._settings.audio_tuning.terminal_segment_tail_silence_ms
+        if _needs_extra_terminal_tail(rendered):
+            tail_ms += self._settings.audio_tuning.terminal_long_token_extra_tail_silence_ms
+        return tail_ms
+
+
+def _last_word(text: str) -> str:
+    words = [word.strip(".,;:!?()[]{}\"'") for word in text.split() if word.strip(".,;:!?()[]{}\"'")]
+    return words[-1] if words else ""
+
+
+def _needs_extra_terminal_tail(rendered: RenderedAudioSegment) -> bool:
+    word = _last_word(rendered.text)
+    return rendered.terminal and (rendered.sensitive or len(word) >= 11 or any(char.isupper() for char in word))

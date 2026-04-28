@@ -61,6 +61,17 @@ TECHNICAL_ANCHOR_WORDS = {
     "episode",
     "user",
     "profile",
+    "text",
+    "preprocessing",
+    "speech",
+    "synthesis",
+    "prompt",
+    "engineering",
+    "embeddings",
+    "fine",
+    "tuning",
+    "tokenizer",
+    "behavior",
 }
 TECHNICAL_COMPONENT_PRONUNCIATIONS = {
     "api": "ei pi ai",
@@ -70,7 +81,7 @@ TECHNICAL_COMPONENT_PRONUNCIATIONS = {
     "json": "yei son",
     "url": "iu ar el",
     "uri": "iu ar ai",
-    "id": "aidí",
+    "id": "ai di",
     "ids": "ai di es",
     "key": "key",
     "access": "access",
@@ -89,6 +100,15 @@ TECHNICAL_COMPONENT_PRONUNCIATIONS = {
 ALPHANUMERIC_ACRONYM_PRONUNCIATIONS = {
     "s3": "es tri",
     "ec2": "i si tú",
+}
+FORCED_TECHNICAL_LEXICON_TERMS = {
+    "embedding",
+    "embeddings",
+    "tokenizer",
+    "tokenizer behavior",
+    "text preprocessing",
+    "speech synthesis",
+    "prompt engineering",
 }
 LETTER_PRONUNCIATION = {
     "A": "ei",
@@ -313,6 +333,12 @@ def segment_text_for_tts(
             sequence.extend(chunk for chunk in chunks if chunk)
             if index < len(sentences) - 1 and sentence_pause_ms > 0:
                 sequence.append(sentence_pause_ms)
+        if (
+            settings
+            and settings.audio_tuning.paragraph_pause_ms > 0
+            and paragraph != paragraphs[-1]
+        ):
+            sequence.append(settings.audio_tuning.paragraph_pause_ms)
     return sequence
 
 
@@ -414,7 +440,7 @@ def _segment_spans_for_technical_paragraph(
             if isinstance(item, int):
                 pending_pause = max(pending_pause, item)
                 continue
-            if _try_merge_short_segment(
+            if pending_pause == 0 and _try_merge_short_segment(
                 sequence,
                 item,
                 min_segment_chars=min_segment_chars,
@@ -518,6 +544,30 @@ def _split_long_sentence_prosody_safe(
     for word_index, word in enumerate(words):
         candidate_words = [*buffer, word.text]
         candidate = " ".join(candidate_words).strip()
+        if buffer and _should_break_prosody_group(
+            buffer_words=buffer,
+            next_word=word.text,
+            protected_indices=protected_indices,
+            previous_index=word_index - 1,
+            next_index=word_index,
+            settings=settings,
+        ):
+            chunk = " ".join(buffer).strip()
+            if chunk:
+                chunks.append(chunk)
+                if debug:
+                    debug.add_segmentation_event(
+                        {
+                            "event": "prosody_group_break",
+                            "reason": "punctuation_or_technical_density",
+                            "language": language,
+                            "candidate": chunk,
+                            "previous_word": words[word_index - 1].text,
+                            "next_word": word.text,
+                        }
+                    )
+            buffer = [word.text]
+            continue
         if buffer and len(candidate) > max_chars:
             unsafe_break = _is_unsafe_break(
                 previous_index=word_index - 1,
@@ -525,7 +575,8 @@ def _split_long_sentence_prosody_safe(
                 protected_indices=protected_indices,
                 settings=settings,
             )
-            if unsafe_break and len(candidate) <= max_chars + overflow:
+            previous_is_phrase_boundary = words[word_index - 1].text.endswith((",", ";", ":"))
+            if unsafe_break and not previous_is_phrase_boundary and len(candidate) <= max_chars + overflow:
                 buffer.append(word.text)
                 if debug:
                     debug.add_segmentation_event(
@@ -566,17 +617,18 @@ def _segment_sentence(
     settings: AppSettings | None = None,
     debug: TextProcessingDebug | None = None,
 ) -> list[str]:
-    if len(sentence) > max_chars:
+    effective_max_chars = _effective_sentence_max_chars(sentence, max_chars=max_chars, settings=settings)
+    if len(sentence) > effective_max_chars:
         if settings and settings.audio_tuning.sensitive_segment_detection:
             parts = _split_long_sentence_prosody_safe(
                 sentence,
-                max_chars=max_chars,
+                max_chars=effective_max_chars,
                 language=language,
                 settings=settings,
                 debug=debug,
             )
         else:
-            parts = _split_long_sentence(sentence, max_chars)
+            parts = _split_long_sentence(sentence, effective_max_chars)
     else:
         parts = [sentence.strip()]
     if not parts:
@@ -589,6 +641,54 @@ def _segment_sentence(
             cleaned = re.sub(r"[.;:]+\s*$", "", cleaned).strip()
         cleaned_parts.append(cleaned)
     return [part for part in cleaned_parts if part]
+
+
+def _effective_sentence_max_chars(
+    sentence: str,
+    *,
+    max_chars: int,
+    settings: AppSettings | None,
+) -> int:
+    if not settings:
+        return max_chars
+    technical_count = _technical_token_count(sentence)
+    if technical_count >= settings.audio_tuning.technical_density_threshold:
+        return min(max_chars, settings.audio_tuning.technical_density_max_chars)
+    return max_chars
+
+
+def _technical_token_count(text: str) -> int:
+    words = _word_infos(text)
+    return sum(1 for word in words if _protected_token_reasons(word.text, word.cleaned, language="es"))
+
+
+def _should_break_prosody_group(
+    *,
+    buffer_words: list[str],
+    next_word: str,
+    protected_indices: set[int],
+    previous_index: int,
+    next_index: int,
+    settings: AppSettings,
+) -> bool:
+    if _is_unsafe_break(
+        previous_index=previous_index,
+        next_index=next_index,
+        protected_indices=protected_indices,
+        settings=settings,
+    ):
+        previous_word = buffer_words[-1] if buffer_words else ""
+        if not previous_word.endswith((",", ";", ":")):
+            return False
+    chunk = " ".join(buffer_words).strip()
+    if len(chunk) < settings.audio_tuning.prosody_group_min_chars:
+        return False
+    technical_count = _technical_token_count(chunk)
+    previous_word = buffer_words[-1] if buffer_words else ""
+    punctuation_break = previous_word.endswith((",", ";", ":"))
+    density_break = technical_count >= settings.audio_tuning.max_technical_tokens_per_segment
+    connector_break = _clean_word(next_word) in {"con", "sin", "y", "pero", "aunque", "manteniendo"}
+    return punctuation_break or density_break or (connector_break and technical_count > 0)
 
 
 def _word_infos(text: str) -> list[WordInfo]:
@@ -799,6 +899,7 @@ def _apply_pronunciation_lexicon(
     debug: TextProcessingDebug | None = None,
 ) -> str:
     adapted = text
+    placeholders: dict[str, str] = {}
     for source, target in sorted(settings.speech.pronunciation_lexicon.items(), key=lambda item: len(item[0]), reverse=True):
         if not _should_apply_pronunciation_entry(source, settings):
             continue
@@ -809,9 +910,13 @@ def _apply_pronunciation_lexicon(
             if debug:
                 reason = "pronunciation_lexicon_phrase" if " " in source else "pronunciation_lexicon"
                 debug.add(token=match.group(0), output=output, reason=reason)
-            return output
+            key = f"@@zzlex{len(placeholders)}@@"
+            placeholders[key] = output
+            return key
 
         adapted = pattern.sub(replace, adapted)
+    for key, value in placeholders.items():
+        adapted = adapted.replace(key, value)
     return adapted
 
 
@@ -820,7 +925,9 @@ def _should_apply_pronunciation_entry(source: str, settings: AppSettings) -> boo
         return True
     if " " in source:
         parts = [part.casefold() for part in source.split()]
-        return any(part in TECHNICAL_ANCHOR_WORDS or len(part) <= 4 for part in parts)
+        return source.casefold() in FORCED_TECHNICAL_LEXICON_TERMS or any(part in TECHNICAL_ANCHOR_WORDS or len(part) <= 4 for part in parts)
+    if source.casefold() in FORCED_TECHNICAL_LEXICON_TERMS:
+        return True
     if any(char in source for char in "./_+-") or any(char.isdigit() for char in source):
         return True
     compact = source.replace(" ", "")

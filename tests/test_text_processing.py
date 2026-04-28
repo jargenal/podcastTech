@@ -42,7 +42,7 @@ class TextProcessingTestCase(unittest.TestCase):
         lowered = adapted.casefold()
         self.assertIn("access", lowered)
         self.assertIn("key", lowered)
-        self.assertIn("aidí", lowered)
+        self.assertIn("ai di", lowered)
 
     def test_parser_applies_adaptation_inside_text_blocks(self) -> None:
         document = parse_input_document(
@@ -243,13 +243,13 @@ class TextProcessingTestCase(unittest.TestCase):
     def test_mixed_case_tokens_use_component_verbalization(self) -> None:
         adapted, debug = self._adapt_debug("accessKeyId episodeId userName refreshToken profileImageURL")
         lowered = adapted.casefold()
-        self.assertIn("access key aidí", lowered)
-        self.assertIn("episode aidí", lowered)
+        self.assertIn("access key ai di", lowered)
+        self.assertIn("episode ai di", lowered)
         self.assertIn("user name", lowered)
         self.assertIn("refresh token", lowered)
         self.assertIn("profile image iu ar el", lowered)
         token_map = {item["token"]: item for item in debug.technical_tokens}
-        self.assertEqual(token_map["episodeId"]["parts"][1]["output"], "aidí")
+        self.assertEqual(token_map["episodeId"]["parts"][1]["output"], "ai di")
         self.assertEqual(token_map["profileImageURL"]["parts"][2]["strategy"], "technical_component")
 
     def test_alphanumeric_acronym_sequence_stays_articulated(self) -> None:
@@ -273,6 +273,56 @@ class TextProcessingTestCase(unittest.TestCase):
         speech_items = [item for item in sequence if not isinstance(item, int)]
         self.assertTrue(speech_items[0].text.endswith("."))
         self.assertTrue(speech_items[-1].text.endswith("."))
+
+    def test_benchmark_paragraph_splits_into_safe_prosody_groups(self) -> None:
+        paragraph = (
+            "Finalmente, este benchmark también debe revelar si el pipeline puede manejar una explicación técnica real "
+            "sobre text preprocessing, speech synthesis, prompt engineering, embeddings, fine-tuning y tokenizer behavior, "
+            "manteniendo una lectura natural de principio a fin, con pausas razonables, sin microcortes innecesarios y sin "
+            "esa sensación de voz robotizada que suele aparecer después de ciertos términos especializados."
+        )
+        spans = adapt_text_to_speech_spans(normalize_text(paragraph), self.settings)
+        sequence = segment_spans_for_tts(
+            spans,
+            max_chars=220,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=False,
+            reading_mode="technical_paragraph",
+            min_segment_chars=70,
+            settings=self.settings,
+        )
+        speech_items = [item for item in sequence if not isinstance(item, int)]
+        self.assertGreaterEqual(len(speech_items), 3)
+        self.assertTrue(speech_items[-1].text.endswith("."))
+        self.assertLessEqual(len(speech_items[-1].text), self.settings.audio_tuning.technical_density_max_chars + 80)
+        protected_terms = [
+            "text preprocessing",
+            "speech synthesis",
+            "prompt engineering",
+            "embedins",
+            "fain tiunin",
+            "tokenaizer behavior",
+        ]
+        rendered = " ".join(item.text for item in speech_items).casefold()
+        for term in protected_terms:
+            self.assertIn(term, rendered)
+        for item in speech_items:
+            self.assertFalse(item.text.strip().endswith(("text", "speech", "prompt", "tokenaizer")))
+
+    def test_paragraph_break_inserts_clean_pause(self) -> None:
+        sequence = segment_spans_for_tts(
+            [self._span("Primer párrafo técnico.\n\nSegundo párrafo con CloudWatch.", "es")],
+            max_chars=220,
+            sentence_pause_ms=220,
+            bilingual_transition_pause_ms=70,
+            strip_terminal_periods=False,
+            reading_mode="technical_paragraph",
+            min_segment_chars=70,
+            settings=self.settings,
+        )
+        pauses = [item for item in sequence if isinstance(item, int)]
+        self.assertIn(self.settings.audio_tuning.paragraph_pause_ms, pauses)
 
     def test_parser_supports_optional_english_voice_tag(self) -> None:
         document = parse_input_document(
