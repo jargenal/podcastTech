@@ -14,7 +14,9 @@ from app.services.disk_audio_assembler import DiskAudioAssembler
 from app.services.history_service import HistoryService
 from app.services.job_manager import JobManager
 from app.services.render_manifest import RenderManifestItem, RenderManifestStore
+from app.services.render_planner import RenderPlan, RenderPlanner
 from app.utils.files import safe_name
+from app.utils.system import has_ffmpeg
 from app.utils.text_parser import parse_input_document
 from app.utils.text_processing import TextProcessingDebug, estimate_duration_seconds, segment_spans_for_tts
 
@@ -33,6 +35,7 @@ class GenerationService:
         self._tts = tts_service
         self._audio_pipeline = audio_pipeline
         self._disk_audio_assembler = DiskAudioAssembler(settings, audio_pipeline)
+        self._render_planner = RenderPlanner(settings)
         self._history = history_service
         self._jobs = job_manager
 
@@ -88,14 +91,32 @@ class GenerationService:
             sequence_plan = self._build_sequence(document, options.segment_length, debug=text_debug)
             total_steps = max(len(sequence_plan), 1)
             await self._jobs.add_log(job_id, f"Plan de render: {total_steps} items entre segmentos y pausas.")
-            long_render_enabled, long_render_reason = self._long_render_decision(
+            render_plan = self._render_planner.plan(
+                raw_text=raw_text,
+                document=document,
+                sequence_plan=sequence_plan,
                 options=options,
                 estimated_seconds=estimated_seconds,
-                sequence_plan=sequence_plan,
+                text_debug=text_debug,
+                ffmpeg_available=has_ffmpeg(),
             )
+            await self._jobs.add_log(
+                job_id,
+                (
+                    "Estrategia de render: "
+                    f"{render_plan.strategy} | riesgo={render_plan.risk_level} | razones={render_plan.summary}."
+                ),
+            )
+            for warning in render_plan.warnings:
+                await self._jobs.add_warning(job_id, warning)
+            if render_plan.requires_disk and not render_plan.ffmpeg_available:
+                raise RuntimeError(
+                    "FFmpeg no esta disponible y la estrategia segura requiere render en disco. "
+                    "Instala FFmpeg o reduce el guion antes de generar."
+                )
 
-            if long_render_enabled:
-                await self._jobs.add_log(job_id, f"long_render activo: {long_render_reason}.")
+            if render_plan.requires_disk:
+                await self._jobs.add_log(job_id, f"Render en disco activo: {render_plan.strategy}.")
                 output_files, duration_seconds, pipeline_warnings = await self._generate_long_render(
                     job_id=job_id,
                     document=document,
@@ -105,7 +126,7 @@ class GenerationService:
                     speaker_wav=speaker_wav,
                     english_speaker_wav=english_speaker_wav,
                     estimated_seconds=estimated_seconds,
-                    trigger_reason=long_render_reason,
+                    render_plan=render_plan,
                 )
             else:
                 output_files, duration_seconds, pipeline_warnings = await self._generate_standard_render(
@@ -116,6 +137,7 @@ class GenerationService:
                     text_debug=text_debug,
                     speaker_wav=speaker_wav,
                     english_speaker_wav=english_speaker_wav,
+                    render_plan=render_plan,
                 )
 
             for warning in pipeline_warnings:
@@ -222,6 +244,7 @@ class GenerationService:
         text_debug: TextProcessingDebug,
         speaker_wav: Path,
         english_speaker_wav: Path | None,
+        render_plan: RenderPlan,
     ) -> tuple:
         total_steps = max(len(sequence_plan), 1)
         job_temp_dir = self._settings.temp_path / job_id
@@ -282,7 +305,7 @@ class GenerationService:
             export_m4a=options.export_m4a,
             debug_path=self._settings.output_path / "debug" / f"{job_id}.json",
             job_id=job_id,
-            debug_metadata=self._text_debug_payload(text_debug),
+            debug_metadata={**self._text_debug_payload(text_debug), "render_plan": render_plan.model_dump(mode="json")},
         )
 
     async def _generate_long_render(
@@ -296,7 +319,7 @@ class GenerationService:
         speaker_wav: Path,
         english_speaker_wav: Path | None,
         estimated_seconds: float | None,
-        trigger_reason: str,
+        render_plan: RenderPlan,
     ) -> tuple:
         total_steps = max(len(sequence_plan), 1)
         render_dir = self._settings.output_path / "renders" / job_id
@@ -307,9 +330,10 @@ class GenerationService:
             job_id=job_id,
             title=document.title,
             estimated_seconds=estimated_seconds,
-            trigger_reason=trigger_reason,
+            trigger_reason=render_plan.summary,
             total_items=len(sequence_plan),
             total_speech_segments=sum(1 for item in sequence_plan if not isinstance(item, int)),
+            render_plan=render_plan.model_dump(mode="json"),
         )
         validator = AudioSegmentValidator(self._settings)
         audio_sequence: list[RenderedAudioSegment | int] = []
@@ -395,7 +419,7 @@ class GenerationService:
             export_m4a=options.export_m4a,
             debug_path=self._settings.output_path / "debug" / f"{job_id}.json",
             job_id=job_id,
-            debug_metadata=self._text_debug_payload(text_debug),
+            debug_metadata={**self._text_debug_payload(text_debug), "render_plan": render_plan.model_dump(mode="json")},
         )
         manifest_store.mark_outputs(output_files.model_dump(mode="json"))
         manifest_store.save()
@@ -506,22 +530,20 @@ class GenerationService:
         estimated_seconds: float | None,
         sequence_plan: list[SpeechSpan | int],
     ) -> tuple[bool, str]:
-        config = self._settings.long_render
-        if not config.enabled:
-            return False, "disabled"
-        if options.long_render is False:
-            return False, "disabled_by_request"
-        if options.long_render is True:
-            return True, "forced_by_request"
-        if config.force:
-            return True, "forced_by_settings"
-
-        speech_segments = sum(1 for item in sequence_plan if not isinstance(item, int))
-        if estimated_seconds is not None and estimated_seconds >= config.auto_enable_min_estimated_seconds:
-            return True, f"estimated_seconds>={config.auto_enable_min_estimated_seconds}"
-        if speech_segments >= config.auto_enable_min_segments:
-            return True, f"speech_segments>={config.auto_enable_min_segments}"
-        return False, "below_threshold"
+        debug = TextProcessingDebug()
+        for item in sequence_plan:
+            if isinstance(item, SpeechSpan) and item.sensitive:
+                debug.add_sensitive_segment({"text": item.text, "reasons": item.sensitivity_reasons})
+        plan = self._render_planner.plan(
+            raw_text=" ".join(item.text for item in sequence_plan if isinstance(item, SpeechSpan)),
+            document=ParsedDocument(blocks=[]),
+            sequence_plan=sequence_plan,
+            options=options,
+            estimated_seconds=estimated_seconds,
+            text_debug=debug,
+            ffmpeg_available=has_ffmpeg(),
+        )
+        return plan.requires_disk, plan.summary
 
     @staticmethod
     def _text_debug_payload(text_debug: TextProcessingDebug) -> dict[str, object]:

@@ -7,13 +7,15 @@ from unittest.mock import patch
 from pydub.generators import Sine
 
 from app.config.settings import AppSettings, _default_variants
-from app.models.domain import GenerationOptions, SpeechSpan
+from app.models.domain import GenerationOptions, ParsedDocument, SpeechSpan
 from app.services.audio_pipeline import AudioPipeline, RenderedAudioSegment
 from app.services.disk_audio_assembler import DiskAudioAssembler
 from app.services.generation_service import GenerationService
 from app.services.history_service import HistoryService
 from app.services.job_manager import JobManager
 from app.services.render_manifest import RenderManifestItem, RenderManifestStore
+from app.services.render_planner import RenderPlanner
+from app.utils.text_processing import TextProcessingDebug
 
 
 class _NoopTTS:
@@ -21,7 +23,7 @@ class _NoopTTS:
 
 
 class LongRenderPipelineTestCase(unittest.TestCase):
-    def test_long_render_decision_uses_duration_or_segment_threshold(self) -> None:
+    def test_render_planner_uses_duration_segments_and_safety_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = AppSettings(
@@ -52,6 +54,19 @@ class LongRenderPipelineTestCase(unittest.TestCase):
             self.assertTrue(enabled)
             self.assertIn("speech_segments", reason)
 
+            plan = RenderPlanner(settings).plan(
+                raw_text=" ".join(item.text for item in many_segments),
+                document=ParsedDocument(),
+                sequence_plan=many_segments,
+                options=GenerationOptions(long_render=False),
+                estimated_seconds=100,
+                text_debug=TextProcessingDebug(),
+                ffmpeg_available=True,
+            )
+            self.assertEqual(plan.strategy, "long_disk_render")
+            self.assertFalse(plan.allows_memory_assembly)
+            self.assertTrue(any("ignorado" in warning for warning in plan.warnings))
+
     def test_render_manifest_persists_segment_checkpoints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "manifest.json"
@@ -63,6 +78,7 @@ class LongRenderPipelineTestCase(unittest.TestCase):
                 trigger_reason="test",
                 total_items=2,
                 total_speech_segments=1,
+                render_plan={"strategy": "long_disk_render", "risk_level": "high"},
             )
             store.upsert_item(
                 RenderManifestItem(
@@ -82,8 +98,28 @@ class LongRenderPipelineTestCase(unittest.TestCase):
 
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["mode"], "long_render")
+            self.assertEqual(payload["render_plan"]["strategy"], "long_disk_render")
             self.assertEqual(payload["items"][0]["status"], "validated")
             self.assertEqual(payload["items"][0]["validation"]["duration_ms"], 1000)
+
+    def test_disk_assembler_refuses_memory_fallback_when_concat_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = AppSettings(
+                variants=_default_variants(),
+                output_dir=str(root),
+                long_render={"assemble_with_ffmpeg_concat": False},
+            )
+            assembler = DiskAudioAssembler(settings, AudioPipeline(settings))
+            with self.assertRaisesRegex(RuntimeError, "fallback silencioso"):
+                assembler.assemble(
+                    sequence=[],
+                    title="Unsafe",
+                    render_dir=root / "renders" / "job",
+                    normalize_audio=False,
+                    export_mp3=False,
+                    export_m4a=False,
+                )
 
     def test_disk_assembler_writes_debug_and_concat_plan_without_final_memory_concat(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

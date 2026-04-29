@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -120,13 +121,41 @@ class AudioPipeline:
 
         if export_mp3 and ffmpeg_available:
             mp3_name = f"{stem}.mp3"
-            with combined.export(self._settings.output_path / mp3_name, format="mp3", bitrate="192k"):
-                pass
+            _run_ffmpeg(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(wav_path),
+                    "-codec:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "192k",
+                    str(self._settings.output_path / mp3_name),
+                ]
+            )
 
         if export_m4a and ffmpeg_available:
             m4a_name = f"{stem}.m4a"
-            with combined.export(self._settings.output_path / m4a_name, format="ipod"):
-                pass
+            _run_ffmpeg(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(wav_path),
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    str(self._settings.output_path / m4a_name),
+                ]
+            )
 
         duration_seconds = round(len(combined) / 1000, 2)
         if debug_path is not None:
@@ -292,3 +321,11 @@ def _last_word(text: str) -> str:
 def _needs_extra_terminal_tail(rendered: RenderedAudioSegment) -> bool:
     word = _last_word(rendered.text)
     return rendered.terminal and (rendered.sensitive or len(word) >= 11 or any(char.isupper() for char in word))
+
+
+def _run_ffmpeg(command: list[str]) -> None:
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        details = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(f"FFmpeg fallo durante exportacion de audio: {details}") from exc

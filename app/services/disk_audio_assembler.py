@@ -34,20 +34,12 @@ class DiskAudioAssembler:
         debug_metadata: dict[str, object] | None = None,
     ) -> tuple[OutputFiles, float, list[str]]:
         if not self._settings.long_render.assemble_with_ffmpeg_concat:
-            output_files, duration_seconds, warnings = self._audio_pipeline.assemble(
-                sequence=sequence,
-                title=title,
-                normalize_audio=normalize_audio,
-                export_mp3=export_mp3,
-                export_m4a=export_m4a,
-                debug_path=debug_path,
-                job_id=job_id,
-                debug_metadata=debug_metadata,
+            raise RuntimeError(
+                "El render en disco requiere long_render.assemble_with_ffmpeg_concat=true; "
+                "no se permite fallback silencioso a ensamblado en memoria."
             )
-            warnings.insert(0, "long_render uso ensamblado en memoria porque assemble_with_ffmpeg_concat=false.")
-            return output_files, duration_seconds, warnings
 
-        if self._settings.long_render.assemble_with_ffmpeg_concat and not has_ffmpeg():
+        if not has_ffmpeg():
             raise RuntimeError("long_render requiere FFmpeg para ensamblar desde disco sin cargar todo el audio en RAM.")
 
         processed_dir = render_dir / "processed"

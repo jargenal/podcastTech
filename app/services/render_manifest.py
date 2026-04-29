@@ -36,6 +36,7 @@ class RenderManifest(BaseModel):
     trigger_reason: str = ""
     total_items: int = 0
     total_speech_segments: int = 0
+    render_plan: dict[str, object] = Field(default_factory=dict)
     output_files: dict[str, str | None] = Field(default_factory=dict)
     items: list[RenderManifestItem] = Field(default_factory=list)
 
@@ -54,6 +55,7 @@ class RenderManifestStore:
         trigger_reason: str,
         total_items: int,
         total_speech_segments: int,
+        render_plan: dict[str, object] | None = None,
     ) -> RenderManifest:
         if self.path.exists():
             self.manifest = RenderManifest.model_validate_json(self.path.read_text(encoding="utf-8"))
@@ -66,6 +68,7 @@ class RenderManifestStore:
             trigger_reason=trigger_reason,
             total_items=total_items,
             total_speech_segments=total_speech_segments,
+            render_plan=render_plan or {},
         )
         self.save()
         return self.manifest

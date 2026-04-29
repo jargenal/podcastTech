@@ -177,24 +177,27 @@ python -c "from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/x
 - El proyecto incluye `eco_mode` activo por defecto para limitar hilos de PyTorch y enfriar `250 ms` entre segmentos.
 - Puedes ajustar `eco_mode.max_torch_threads`, `eco_mode.max_interop_threads` y `eco_mode.inter_segment_cooldown_ms` en `settings.json`.
 
-### Renders largos en disco
+### Render seguro automatico
 
-La seccion `long_render` de `settings.json` activa un pipeline robusto para guiones extensos. Se usa automaticamente cuando:
+Cada generacion pasa primero por `RenderPlanner`, que clasifica el job en una estrategia:
 
-- la duracion estimada supera `long_render.auto_enable_min_estimated_seconds` (por defecto `1200`, 20 minutos)
-- o el plan supera `long_render.auto_enable_min_segments` (por defecto `80` segmentos de voz)
-- o `long_render.force` esta en `true`
-- o una llamada a `/generate` envia `long_render=true`
+- `standard_memory_render`: solo para audios pequenos y simples.
+- `safe_disk_render`: audios medianos, tecnicos o bilingues que conviene ensamblar en disco.
+- `long_disk_render`: audios largos, muchos segmentos o mas de 20 minutos estimados.
+- `critical_disk_render`: renders muy extensos o de alto riesgo.
+
+La decision es automatica. El usuario no necesita activar manualmente `long_render`; si un render supera los limites seguros de memoria, el sistema usa disco aunque la solicitud intente desactivar `long_render`. La seccion `render_safety` de `settings.json` define los limites centrales de duracion, caracteres, cantidad de items, segmentos de voz y densidad tecnica/bilingue.
 
 En este modo:
 
 - cada segmento XTTS se escribe como WAV persistente en `output/renders/<job_id>/segments/`
 - cada segmento se valida antes de ensamblar
 - los segmentos sospechosos se reintentan hasta `long_render.max_segment_retries`
-- el manifiesto queda en `output/renders/<job_id>/manifest.json`
+- el manifiesto queda en `output/renders/<job_id>/manifest.json` e incluye `render_plan`, razones, metricas y politica de calidad
 - los chunks procesados para concat quedan en `output/renders/<job_id>/processed/`
 - el debug completo queda en `output/debug/<job_id>.json`
 - el WAV final se ensambla con FFmpeg concat sin construir un `AudioSegment` gigante en RAM
+- si se pide MP3 o M4A, primero se genera un WAV estable y luego se convierte con FFmpeg
 
 Configuracion recomendada para audios de mas de 25 minutos:
 
@@ -217,7 +220,25 @@ Configuracion recomendada para audios de mas de 25 minutos:
 }
 ```
 
-Para normalizar un render largo sin cargar todo en memoria, activa `normalize_final_with_ffmpeg`. Si FFmpeg no esta instalado y `assemble_with_ffmpeg_concat` esta activo, el render largo falla de forma explicita porque no puede garantizar ensamblado en disco.
+```json
+"render_safety": {
+  "memory_max_estimated_seconds": 600,
+  "memory_max_speech_segments": 35,
+  "memory_max_total_items": 55,
+  "memory_max_characters": 9000,
+  "safe_disk_min_estimated_seconds": 420,
+  "long_disk_min_estimated_seconds": 1200,
+  "critical_disk_min_estimated_seconds": 2400,
+  "safe_disk_min_speech_segments": 30,
+  "long_disk_min_speech_segments": 80,
+  "critical_disk_min_speech_segments": 180,
+  "technical_density_high_ratio": 0.025,
+  "english_span_high_ratio": 0.12,
+  "sensitive_segment_high_ratio": 0.18
+}
+```
+
+Para normalizar un render largo sin cargar todo en memoria, activa `normalize_final_with_ffmpeg`. Si FFmpeg no esta instalado y el plan requiere disco, el render falla de forma explicita porque no puede garantizar ensamblado seguro. `DiskAudioAssembler` no vuelve silenciosamente a `AudioPipeline.assemble()` en memoria.
 
 ### Si fallaste con Python 3.13 o 3.14
 

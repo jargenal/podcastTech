@@ -86,6 +86,21 @@
     "concat_sample_rate": 24000,
     "concat_channels": 1
   },
+  "render_safety": {
+    "memory_max_estimated_seconds": 600,
+    "memory_max_speech_segments": 35,
+    "memory_max_total_items": 55,
+    "memory_max_characters": 9000,
+    "safe_disk_min_estimated_seconds": 420,
+    "long_disk_min_estimated_seconds": 1200,
+    "critical_disk_min_estimated_seconds": 2400,
+    "safe_disk_min_speech_segments": 30,
+    "long_disk_min_speech_segments": 80,
+    "critical_disk_min_speech_segments": 180,
+    "technical_density_high_ratio": 0.025,
+    "english_span_high_ratio": 0.12,
+    "sensitive_segment_high_ratio": 0.18
+  },
   "audio_tuning": {
     "reading_mode": "technical_paragraph",
     "sentence_pause_ms": 220,

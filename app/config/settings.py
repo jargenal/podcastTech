@@ -115,6 +115,22 @@ class LongRenderConfig(BaseModel):
     concat_channels: int = Field(1, description="Channel count used for disk concat chunks.")
 
 
+class RenderSafetyConfig(BaseModel):
+    memory_max_estimated_seconds: int = Field(600, description="Maximum estimated duration allowed for memory assembly.")
+    memory_max_speech_segments: int = Field(35, description="Maximum speech segments allowed for memory assembly.")
+    memory_max_total_items: int = Field(55, description="Maximum plan items allowed for memory assembly.")
+    memory_max_characters: int = Field(9000, description="Maximum source characters allowed for memory assembly.")
+    safe_disk_min_estimated_seconds: int = Field(420, description="Duration that starts preferring disk render.")
+    long_disk_min_estimated_seconds: int = Field(1200, description="Duration that requires long disk render.")
+    critical_disk_min_estimated_seconds: int = Field(2400, description="Duration that requires critical disk render.")
+    safe_disk_min_speech_segments: int = Field(30, description="Speech segments that start preferring disk render.")
+    long_disk_min_speech_segments: int = Field(80, description="Speech segments that require long disk render.")
+    critical_disk_min_speech_segments: int = Field(180, description="Speech segments that require critical disk render.")
+    technical_density_high_ratio: float = Field(0.025, description="Technical tokens per character that raise render risk.")
+    english_span_high_ratio: float = Field(0.12, description="English speech segment ratio that raises render risk.")
+    sensitive_segment_high_ratio: float = Field(0.18, description="Sensitive speech segment ratio that raises render risk.")
+
+
 class AudioTuningConfig(BaseModel):
     reading_mode: Literal["standard", "technical_paragraph"] = Field(
         "technical_paragraph",
@@ -205,6 +221,7 @@ class AppSettings(BaseModel):
     speech: SpeechConfig = Field(default_factory=SpeechConfig)
     eco_mode: EcoModeConfig = Field(default_factory=EcoModeConfig)
     long_render: LongRenderConfig = Field(default_factory=LongRenderConfig)
+    render_safety: RenderSafetyConfig = Field(default_factory=RenderSafetyConfig)
     audio_tuning: AudioTuningConfig = Field(default_factory=AudioTuningConfig)
 
     @property
@@ -298,6 +315,7 @@ def get_settings() -> AppSettings:
         raw["speech"] = speech_defaults
     raw.setdefault("eco_mode", EcoModeConfig().model_dump(mode="json"))
     raw.setdefault("long_render", LongRenderConfig().model_dump(mode="json"))
+    raw.setdefault("render_safety", RenderSafetyConfig().model_dump(mode="json"))
     raw.setdefault("audio_tuning", AudioTuningConfig().model_dump(mode="json"))
     settings = AppSettings.model_validate(raw)
 
