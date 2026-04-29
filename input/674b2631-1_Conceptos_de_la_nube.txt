@@ -1,0 +1,536 @@
+[TITULO]
+AWS Cloud Practitioner: Conceptos de Nube
+
+[IDIOMA]
+es_latam
+
+[VOZ]
+default_es_mx.wav
+
+[TEXTO]
+Bienvenido a este episodio de repaso técnico para la certificación [EN]AWS Certified Cloud Practitioner[/EN].
+Hoy vamos a estudiar uno de los bloques más importantes del examen.
+Los conceptos de nube.
+Este tema parece sencillo.
+Pero en realidad es la base para entender por qué existen servicios como [EN]Amazon EC2[/EN], [EN]Amazon S3[/EN], [EN]AWS Lambda[/EN], [EN]Amazon RDS[/EN] y muchos otros.
+
+[PAUSA]
+600
+
+[TEXTO]
+En este episodio vamos a repasar seis ideas fundamentales.
+Elasticidad.
+Escalabilidad.
+Alta disponibilidad.
+Pago por uso.
+Diferencia entre [EN]CapEx[/EN] y [EN]OpEx[/EN].
+Y economía de escala.
+Estos conceptos aparecen de forma directa o indirecta en muchas preguntas del examen.
+No siempre te van a preguntar la definición exacta.
+Muchas veces te van a presentar un caso.
+Y tendrás que reconocer qué principio de nube se está aplicando.
+
+[PAUSA]
+600
+
+[TEXTO]
+Empecemos con una idea central.
+¿Qué es la computación en la nube?
+La computación en la nube permite acceder a recursos tecnológicos bajo demanda.
+Por ejemplo: servidores, almacenamiento, bases de datos, redes, seguridad, analítica e inteligencia artificial.
+La diferencia principal frente a un centro de datos tradicional es que no necesitas comprar toda la infraestructura desde el inicio.
+No tienes que comprar servidores físicos.
+No tienes que preparar un cuarto de servidores.
+No tienes que instalar racks.
+No tienes que calcular desde el primer día cuánta capacidad vas a necesitar durante los próximos cinco años.
+En la nube, consumes recursos cuando los necesitas.
+Y pagas por lo que usas.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para el examen [EN]Cloud Practitioner[/EN], debes recordar esta frase:
+La nube permite cambiar gasto fijo por gasto variable.
+Esto significa que, en lugar de hacer una inversión grande al inicio, puedes pagar por consumo.
+En un modelo tradicional, una empresa compra servidores antes de saber exactamente cuánto uso tendrá.
+Eso es gasto fijo.
+En la nube, la empresa puede iniciar con pocos recursos.
+Luego puede aumentar o reducir capacidad según la demanda.
+Eso es gasto variable.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora pasemos al primer concepto importante.
+Elasticidad.
+Elasticidad significa que un sistema puede aumentar o disminuir recursos de acuerdo con la demanda.
+La palabra clave aquí es adaptarse.
+Si hay más usuarios, el sistema puede crecer.
+Si hay menos usuarios, el sistema puede reducirse.
+El objetivo es tener la capacidad necesaria en el momento correcto.
+Ni demasiado poco.
+Ni demasiado.
+
+[PAUSA]
+600
+
+[TEXTO]
+Pensemos en un ejemplo sencillo.
+Una tienda en línea recibe normalmente mil visitas al día.
+Pero durante el viernes negro recibe cien mil visitas.
+En un centro de datos tradicional, la empresa tendría que comprar servidores suficientes para soportar el pico más alto.
+Pero esos servidores estarían subutilizados durante la mayor parte del año.
+En AWS, la empresa puede usar servicios que escalen durante el pico de demanda.
+Y luego reducir recursos cuando el tráfico baja.
+Eso es elasticidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para el examen, debes asociar elasticidad con frases como:
+Aumentar y disminuir recursos automáticamente.
+Responder a cambios en la demanda.
+Evitar recursos ociosos.
+Evitar falta de capacidad.
+Ajustar la infraestructura al uso real.
+Servicios relacionados con esta idea pueden ser [EN]Amazon EC2 Auto Scaling[/EN], [EN]Elastic Load Balancing[/EN] y [EN]AWS Lambda[/EN].
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora veamos escalabilidad.
+Escalabilidad significa que un sistema puede crecer para manejar más carga.
+Por ejemplo, más usuarios.
+Más transacciones.
+Más archivos.
+Más solicitudes.
+Más procesamiento.
+Un sistema escalable puede aumentar su capacidad sin tener que rediseñarse completamente.
+
+[PAUSA]
+600
+
+[TEXTO]
+La escalabilidad puede entenderse de dos formas.
+Escalabilidad vertical.
+Y escalabilidad horizontal.
+La escalabilidad vertical significa aumentar la capacidad de un recurso existente.
+Por ejemplo, cambiar una instancia pequeña de [EN]Amazon EC2[/EN] por una instancia más grande.
+Más CPU.
+Más memoria.
+Más capacidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+La escalabilidad horizontal significa agregar más recursos.
+Por ejemplo, en lugar de tener un solo servidor grande, tener varios servidores trabajando juntos.
+Este enfoque es muy común en arquitecturas modernas.
+Especialmente cuando se combina con balanceadores de carga.
+Por ejemplo, una aplicación puede tener varias instancias [EN]EC2[/EN] detrás de un [EN]Elastic Load Balancer[/EN].
+El balanceador distribuye el tráfico.
+Y si llegan más usuarios, se pueden agregar más instancias.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora viene una diferencia que suele causar confusión.
+Elasticidad no es exactamente lo mismo que escalabilidad.
+Escalabilidad significa que el sistema puede crecer.
+Elasticidad significa que el sistema puede crecer y reducirse dinámicamente según la demanda.
+Dicho de forma simple:
+Escalabilidad es la capacidad de crecer.
+Elasticidad es la capacidad de ajustarse.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ejemplo para recordar.
+Si una empresa aumenta la capacidad de su sistema porque espera más usuarios durante los próximos meses, eso es escalabilidad.
+Si el sistema aumenta recursos automáticamente durante las horas de mayor tráfico y los reduce en la noche, eso es elasticidad.
+En el examen, esta diferencia es importante.
+Porque muchas preguntas tienen palabras como demanda variable, picos de tráfico, uso temporal o capacidad automática.
+Cuando veas esas palabras, piensa en elasticidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+Pasemos ahora a alta disponibilidad.
+Alta disponibilidad significa diseñar sistemas para que sigan funcionando aunque ocurra una falla.
+La idea no es asumir que nada va a fallar.
+La idea es diseñar sabiendo que las fallas pueden ocurrir.
+Puede fallar un servidor.
+Puede fallar una zona.
+Puede fallar una base de datos.
+Puede fallar una red.
+Un buen diseño en la nube busca reducir el impacto de esas fallas.
+
+[PAUSA]
+600
+
+[TEXTO]
+En AWS, un concepto clave para alta disponibilidad es la infraestructura global.
+AWS organiza su infraestructura en regiones.
+Cada región tiene varias zonas de disponibilidad.
+Una zona de disponibilidad, o [EN]Availability Zone[/EN], es una ubicación aislada dentro de una región.
+Normalmente, una arquitectura altamente disponible distribuye recursos en más de una zona de disponibilidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+Imagina una aplicación desplegada en una sola zona de disponibilidad.
+Si esa zona tiene un problema, la aplicación podría quedar fuera de servicio.
+Ahora imagina la misma aplicación distribuida en dos o tres zonas de disponibilidad.
+Si una zona falla, las otras pueden continuar atendiendo tráfico.
+Eso es una idea básica de alta disponibilidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para el examen, debes relacionar alta disponibilidad con conceptos como:
+Múltiples zonas de disponibilidad.
+Redundancia.
+Tolerancia a fallos.
+Balanceo de carga.
+Recuperación ante fallas.
+Diseño resiliente.
+Y reducción de tiempo fuera de servicio.
+
+[PAUSA]
+600
+
+[TEXTO]
+También debes distinguir alta disponibilidad de recuperación ante desastres.
+Alta disponibilidad busca que el sistema siga operando durante fallas.
+Recuperación ante desastres se enfoca en recuperar el sistema después de un evento grave.
+Por ejemplo, pérdida de una región completa, corrupción de datos o una interrupción mayor.
+Ambos conceptos se relacionan.
+Pero no son exactamente lo mismo.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora hablemos del pago por uso.
+El modelo de pago por uso es una de las ideas más importantes de AWS.
+Significa que pagas solamente por los recursos que consumes.
+Si usas una instancia por una hora, pagas por ese tiempo de uso.
+Si almacenas cierta cantidad de datos, pagas por esa cantidad.
+Si transfieres datos, el costo puede depender del volumen y dirección de la transferencia.
+
+[PAUSA]
+600
+
+[TEXTO]
+Este modelo cambia la forma de pensar en infraestructura.
+Antes, muchas empresas compraban capacidad de más.
+Lo hacían para prepararse ante posibles crecimientos.
+Pero si ese crecimiento no ocurría, terminaban con infraestructura ociosa.
+Con AWS, puedes comenzar pequeño.
+Probar.
+Medir.
+Ajustar.
+Y crecer cuando sea necesario.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para el examen, recuerda estas frases.
+Pagar solo por lo que se usa.
+Reducir inversión inicial.
+Evitar sobreaprovisionamiento.
+Ajustar costos a la demanda.
+Convertir gasto fijo en gasto variable.
+Estas frases suelen aparecer en preguntas sobre beneficios de la nube.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora pasemos a [EN]CapEx[/EN] y [EN]OpEx[/EN].
+[EN]CapEx[/EN] significa [EN]Capital Expenditure[/EN].
+En español, gasto de capital.
+Es una inversión grande que se realiza por adelantado.
+Por ejemplo, comprar servidores.
+Comprar almacenamiento.
+Construir un centro de datos.
+Comprar equipos de red.
+Pagar instalaciones físicas.
+
+[PAUSA]
+600
+
+[TEXTO]
+[EN]OpEx[/EN] significa [EN]Operational Expenditure[/EN].
+En español, gasto operativo.
+Es un gasto asociado a la operación diaria.
+En la nube, muchos costos pasan a ser operativos.
+Por ejemplo, pagar mensualmente por los recursos consumidos.
+Pagar por almacenamiento usado.
+Pagar por tiempo de cómputo.
+Pagar por servicios administrados.
+
+[PAUSA]
+600
+
+[TEXTO]
+La diferencia es importante para el examen.
+En infraestructura tradicional, normalmente hay más [EN]CapEx[/EN].
+Porque la empresa compra activos físicos antes de usarlos.
+En la nube, normalmente hay más [EN]OpEx[/EN].
+Porque la empresa paga por consumo.
+Esto permite más flexibilidad financiera.
+Y reduce el riesgo de invertir demasiado en capacidad que tal vez no se utilice.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ejemplo práctico.
+Una empresa quiere lanzar una nueva aplicación.
+No sabe si tendrá cien usuarios o un millón.
+En un modelo tradicional, tendría que comprar servidores antes del lanzamiento.
+Eso es [EN]CapEx[/EN].
+En AWS, puede iniciar con pocos recursos y pagar según el uso real.
+Eso se acerca más a [EN]OpEx[/EN].
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora hablemos de economía de escala.
+AWS opera infraestructura a una escala enorme.
+Miles y miles de clientes usan recursos de AWS.
+Esa demanda agregada permite que AWS opere centros de datos, redes, energía, hardware y servicios de forma masiva.
+Cuando un proveedor opera a gran escala, puede distribuir costos entre muchos clientes.
+Eso se conoce como economía de escala.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para el examen, la idea principal es esta:
+AWS puede ofrecer costos variables más bajos porque agrega el uso de muchísimos clientes.
+Una empresa individual normalmente no puede obtener la misma escala por sí sola.
+No compra hardware al mismo volumen.
+No opera centros de datos al mismo nivel.
+No distribuye costos entre cientos de miles de clientes.
+Por eso, la nube puede reducir costos unitarios.
+
+[PAUSA]
+600
+
+[TEXTO]
+No debes interpretar economía de escala como que AWS siempre será más barato en cualquier escenario.
+La idea correcta es que AWS puede ofrecer ventajas de costo gracias a su escala.
+Pero el cliente sigue siendo responsable de usar bien los recursos.
+Si se dejan recursos encendidos sin necesidad, los costos pueden aumentar.
+Por eso, economía de escala se complementa con buenas prácticas de optimización de costos.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora conectemos estos conceptos con una pregunta tipo examen.
+Una empresa tiene una aplicación que recibe poco tráfico durante la semana.
+Pero los fines de semana recibe mucho tráfico.
+La empresa quiere evitar pagar por servidores que estén inactivos de lunes a viernes.
+¿Qué beneficio de la nube se refleja aquí?
+La respuesta apunta a elasticidad y pago por uso.
+Elasticidad porque la capacidad puede aumentar o disminuir.
+Pago por uso porque la empresa evita pagar capacidad innecesaria todo el tiempo.
+
+[PAUSA]
+600
+
+[TEXTO]
+Otro ejemplo.
+Una empresa quiere reducir la inversión inicial en servidores físicos.
+Prefiere pagar mensualmente según el consumo real.
+¿Qué concepto se aplica?
+Aquí debes pensar en cambio de [EN]CapEx[/EN] a [EN]OpEx[/EN].
+También en gasto variable.
+Y en pago por uso.
+
+[PAUSA]
+600
+
+[TEXTO]
+Otro ejemplo.
+Una aplicación debe seguir funcionando aunque falle un centro de datos dentro de una región.
+¿Qué concepto aparece?
+Alta disponibilidad.
+La solución probablemente involucra múltiples zonas de disponibilidad.
+También puede involucrar balanceadores de carga, replicación y diseño tolerante a fallos.
+
+[PAUSA]
+600
+
+[TEXTO]
+Otro ejemplo.
+Una empresa necesita aumentar la capacidad de su aplicación porque tendrá más usuarios durante el próximo año.
+¿Qué concepto aparece?
+Escalabilidad.
+El sistema debe poder crecer.
+Si además el crecimiento y reducción ocurren automáticamente según la demanda, entonces hablamos también de elasticidad.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora repasemos los conceptos en formato rápido.
+Elasticidad.
+Ajustar recursos hacia arriba o hacia abajo según la demanda.
+Escalabilidad.
+Capacidad de crecer para soportar más carga.
+Alta disponibilidad.
+Diseño para que el sistema siga funcionando ante fallas.
+Pago por uso.
+Pagar por los recursos consumidos, no por capacidad comprada por adelantado.
+[EN]CapEx[/EN].
+Inversión de capital antes de usar la infraestructura.
+[EN]OpEx[/EN].
+Gasto operativo basado en consumo y operación.
+Economía de escala.
+Reducción de costos unitarios gracias a operación masiva del proveedor cloud.
+
+[PAUSA]
+600
+
+[TEXTO]
+Ahora veamos errores comunes.
+Primer error.
+Creer que elasticidad y escalabilidad son lo mismo.
+No lo son.
+Escalabilidad es crecer.
+Elasticidad es ajustarse dinámicamente.
+
+[PAUSA]
+400
+
+[TEXTO]
+Segundo error.
+Creer que alta disponibilidad significa que nunca habrá fallas.
+Incorrecto.
+Alta disponibilidad significa diseñar para reducir el impacto de las fallas.
+Las fallas pueden ocurrir.
+El diseño debe resistirlas.
+
+[PAUSA]
+400
+
+[TEXTO]
+Tercer error.
+Creer que pago por uso significa que AWS siempre será barato automáticamente.
+Incorrecto.
+AWS permite pagar por consumo.
+Pero si consumes mal, pagas mal.
+Debes apagar recursos innecesarios.
+Elegir servicios adecuados.
+Y monitorear costos.
+
+[PAUSA]
+400
+
+[TEXTO]
+Cuarto error.
+Confundir [EN]CapEx[/EN] y [EN]OpEx[/EN].
+[EN]CapEx[/EN] es inversión inicial fuerte.
+[EN]OpEx[/EN] es gasto operativo recurrente.
+La nube ayuda a cambiar gasto fijo por gasto variable.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para prepararte para el examen, no memorices solo definiciones.
+Hazte preguntas.
+¿Qué problema resuelve este concepto?
+¿Qué palabra clave aparece en el caso?
+Si el caso habla de picos de demanda, piensa en elasticidad.
+Si habla de crecimiento, piensa en escalabilidad.
+Si habla de fallas y continuidad, piensa en alta disponibilidad.
+Si habla de pagar por consumo, piensa en pago por uso.
+Si habla de evitar compra inicial de servidores, piensa en cambio de [EN]CapEx[/EN] a [EN]OpEx[/EN].
+Si habla de costos reducidos por gran volumen de clientes, piensa en economía de escala.
+
+[PAUSA]
+600
+
+[TEXTO]
+También debes recordar que estos conceptos no viven aislados.
+Una buena solución en AWS normalmente combina varios de ellos.
+Por ejemplo, una aplicación web moderna puede usar:
+Un balanceador de carga.
+Varias instancias en múltiples zonas de disponibilidad.
+Auto Scaling.
+Almacenamiento administrado.
+Monitoreo.
+Y pago por uso.
+En ese escenario hay escalabilidad, elasticidad, alta disponibilidad y optimización de costos.
+
+[PAUSA]
+600
+
+[TEXTO]
+Desde la perspectiva de [EN]AWS Cloud Practitioner[/EN], lo importante no es configurar todos estos servicios en profundidad.
+Lo importante es reconocer el valor de negocio y técnico de la nube.
+AWS no espera que seas arquitecto experto en esta certificación.
+Pero sí espera que entiendas por qué una empresa usaría la nube.
+Qué ventajas ofrece.
+Y qué conceptos explican esas ventajas.
+
+[PAUSA]
+600
+
+[TEXTO]
+Cierre del repaso.
+La nube no es simplemente usar servidores de otra empresa.
+La nube cambia la forma de consumir tecnología.
+Permite iniciar rápido.
+Pagar por uso.
+Escalar.
+Adaptarse a la demanda.
+Diseñar para fallas.
+Llegar globalmente.
+Y reducir la carga de administrar infraestructura física.
+
+[PAUSA]
+600
+
+[TEXTO]
+Para tu examen, graba estas ideas:
+Elasticidad es ajuste dinámico.
+Escalabilidad es capacidad de crecimiento.
+Alta disponibilidad es continuidad ante fallas.
+Pago por uso es pagar por consumo.
+[EN]CapEx[/EN] es inversión inicial.
+[EN]OpEx[/EN] es gasto operativo.
+Economía de escala es la ventaja de costo que surge por operar a gran volumen.
+
+[PAUSA]
+600
+
+[TEXTO]
+Si entiendes estos conceptos, tendrás una base sólida para estudiar los siguientes temas:
+Infraestructura global de AWS.
+Seguridad e identidad.
+Servicios principales.
+Facturación.
+Soporte.
+Y buenas prácticas del [EN]AWS Well-Architected Framework[/EN].
+Este fue tu repaso de conceptos de nube para [EN]AWS Certified Cloud Practitioner[/EN].
+
+[PAUSA]
+600
